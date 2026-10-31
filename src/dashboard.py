@@ -388,9 +388,12 @@ def verify_dashboard(paths: Paths, min_bytes: int = 150_000) -> bool:
 
     # Self-contained means CDN assets only: no local script/style/img sources and
     # no relative fetches that would 404 when the file is opened directly.
+    # Tailwind is deliberately absent: cdn.tailwindcss.com sends no
+    # Access-Control-Allow-Origin header, so an SRI-protected (crossorigin)
+    # script tag is blocked outright on any http origin. All layout lives in the
+    # inline stylesheet instead, and these three CDNs do send CORS headers.
     for asset in (
         "cdn.plot.ly/plotly-",
-        "cdn.tailwindcss.com",
         "unpkg.com/lucide@",
         "fonts.googleapis.com",
     ):

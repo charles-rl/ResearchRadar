@@ -198,6 +198,49 @@ by different models. The cache keys on `model`, so switching forces a re-embed.
   HTML strings left are Plotly hover labels, which Plotly renders itself and
   which are escaped at construction.
 
+## Traps found while doing the visual pass
+
+These only show up when the page is actually rendered, which is why the design
+work is checked with real Chromium screenshots at three widths rather than by
+reading the template.
+
+- **`cdn.tailwindcss.com` sends no CORS header.** With `crossorigin="anonymous"`
+  plus an SRI hash the browser refuses it outright on any `http://` origin:
+  `Access to script at 'https://cdn.tailwindcss.com/3.4.16' from origin
+  'http://localhost:8082' has been blocked by CORS policy` and then
+  `tailwind is not defined`. `cdn.plot.ly` and `unpkg.com` both send
+  `access-control-allow-origin: *`; Tailwind is the only one that does not. The
+  page looked half-styled rather than broken, so this was invisible without a
+  screenshot. Tailwind was removed: every utility class became a plain-CSS rule
+  in the inlined stylesheet, and `src.dashboard --verify-only` no longer lists it
+  as an expected asset.
+- **A grid with `min-height: 0` still grows.** `.app-main` was
+  `display: grid; grid-template-columns: ...; min-height: 0` with no row defined,
+  so the implicit row was `auto` and sized to the drawer's full content height
+  (2003 px). The map stretched to match and its square plot was scaled up until
+  it dwarfed the papers. The fix is an explicit
+  `grid-template-rows: minmax(0, 1fr)` on the container, plus `min-height: 0` on
+  the panes. `min-height: 0` alone does not defeat an `auto` track.
+- **1:1 axes letterbox, and that is correct.** With `scaleanchor: "x"`,
+  `scaleratio: 1`, `constrain: "domain"` on x, and equal ranges, Plotly shrinks
+  the x domain to keep the plot square (measured 365.6 px/unit on both axes,
+  stretch 0.999). The leftover space on either side is not a layout bug; framing
+  `[-1, 1]^2` with a rect shape turns it into deliberate margin.
+- **Stars outranked the data they came from.** 33 gap stars at `size: 27` with a
+  `0.16`-opacity halo buried the 120 paper dots. Markers are now 11.5 with a
+  `size: 15, opacity: 0.10` halo, so the corpus stays the dominant texture.
+- **Vertex text collided with the theta labels.** `textposition: "middle right"`
+  on the 4-axis radar put `0.98` on the `P` label and the pair rendered as
+  `0P98`. Values moved to a caption row under the chart, which also freed the
+  polar margins.
+- **An `overflow: hidden` strip clips mid-word.** Making the header metrics
+  sideways-scrollable on phones cut "DISTANCE CO…" in half, which reads as a bug
+  rather than an affordance. Below 640 px the strip is a 3x2 grid instead.
+- **A stray `}` kills the whole inline script.** One extra closing brace after
+  `showToast()` produced `SyntaxError: Unexpected token '}'` and every
+  assertion in the smoke test failed at once, including ones unrelated to the
+  change. The template is re-checked with the nesting linter after each edit.
+
 ## Offline verification
 
 All five stages verify without network access and exit non-zero on failure:

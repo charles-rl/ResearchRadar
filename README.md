@@ -144,16 +144,25 @@ from `models/F2LLM-*` with the recipe above only if you need to re-register.
 `output/index.html` is a single self-contained page: the corpus, the four
 objective fields, and one evidence package per gap are baked into an inline JSON
 payload, so it opens straight from the filesystem with no server and no build
-step. Tailwind, Plotly, and Lucide load from CDNs (pinned, with SRI hashes).
+step. Plotly and Lucide load from CDNs (pinned, with SRI hashes); all styling is
+plain CSS inlined in the page, so there is no CSS framework in the load path.
 
 * **Left panel** — the manifold on `[-1, 1]^2`, papers coloured by regime, the 33
   practical gaps as stars, and layer buttons (keys `1`-`5`) that swap the
-  background between `P_boundary`, `W`, `G`, and `S`.
+  background between `P_boundary`, `W`, `G`, and `S`. The axes are pinned 1:1, so
+  the plot stays square and letterboxes inside a wide pane.
 * **Right panel** — the selected gap's evidence package: a 4-axis objective
   radar, support statistics, the regime mixture, the top-5 anchor papers, the
   L2/L1 lexical split, and the Appendix A.1 prompt with a copy button.
 * **Navigation** — click a star, use the dropdown, or press the arrow keys.
   `#gap=<rank>` deep-links a gap.
+
+The page is responsive without a framework: two stacked panes below 1024px, a
+side-by-side split above it, and a 3x2 stat grid in the header on phones.
+
+Why no CSS framework: `cdn.tailwindcss.com` is the only asset in the page that
+sends **no** `Access-Control-Allow-Origin` header, so a browser blocks it outright
+once the page is served over `http://` — see `docs/implementation-notes.md`.
 
 The prompt text comes from `src.report.render_prompt_text`, the same function
 the Markdown report uses, so the pasted prompt and `KMO_PROMPT_TOP1.txt` are
@@ -165,6 +174,19 @@ payload under a minimal DOM shim, so it catches renderer bugs without a browser:
 ```bash
 node tests/dashboard_smoke.js output/index.html
 ```
+
+To check the rendered page rather than its logic, serve `output/` and screenshot
+it with Playwright's Chromium. This is a throwaway toolchain, deliberately kept
+out of the project:
+
+```bash
+mkdir -p /tmp/pw && cd /tmp/pw && npm init -y && npm i playwright@1.56.1
+PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers npx playwright install chromium
+```
+
+Screenshot at 1600x950, 1440x820, 1024x768 and 430x900. The narrower widths are
+what catch layout drift: the map's grid row and the header metric strip both
+broke silently at 1600px alone.
 
 ## Layout
 

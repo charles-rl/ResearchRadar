@@ -8,29 +8,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<!-- Pinned CDN assets carry SRI hashes so a compromised or tampered CDN cannot
-     inject script into a page that is opened from the local filesystem. Google
-     Fonts CSS is omitted: it varies per user agent and cannot be hashed. -->
-<script src="https://cdn.tailwindcss.com/3.4.16"
-        integrity="sha384-mS5Uq7sE90lgbBDN8xgf34ibEgbZo4gB3tfLY40ZRle+M188BQw8onzNHg6GUZaA"
-        crossorigin="anonymous"></script>
-<script>
-  tailwind.config = {
-    theme: {
-      extend: {
-        colors: {
-          ink: '#0b0f19',
-          panel: '#1e293b',
-          panelDeep: '#141c2b'
-        },
-        fontFamily: {
-          sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
-          mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace']
-        }
-      }
-    }
-  };
-</script>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"
         integrity="sha384-cCVCZkAjYNxaYKbM8lsArLznDF/SvMFr1jcZrvOpSTCa0W40ZAdLzHCEulnUa5i7"
         crossorigin="anonymous"></script>
@@ -41,24 +18,36 @@
   /* ── tokens ─────────────────────────────────────────────────────────── */
   :root {
     --bg: #080b12;
+    --surface: #0a0f18;
     --line: rgba(148, 163, 184, 0.10);
     --line-hi: rgba(148, 163, 184, 0.20);
+    --fg: #e2e8f0;
     --muted: #94a3b8;
     --faint: #64748b;
     --dim: #55637a;
+    --accent: #22d3ee;
+    --sysid: #22d3ee;
+    --sim2real: #fbbf24;
+    --rl: #34d399;
+    --gap: #f9a8d4;
     --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   }
 
   *, *::before, *::after { box-sizing: border-box; }
   html { color-scheme: dark; -webkit-text-size-adjust: 100%; }
   body {
+    margin: 0; min-height: 100vh; font-family: var(--sans); font-size: 13px;
+    color: #cbd5e1; -webkit-font-smoothing: antialiased; overflow-x: hidden;
     background:
       radial-gradient(1100px 520px at 12% -8%, rgba(34, 211, 238, 0.055), transparent 62%),
       radial-gradient(900px 460px at 102% -4%, rgba(139, 92, 246, 0.05), transparent 58%),
       var(--bg);
   }
-
-  #drawer-scroll { scrollbar-gutter: stable; }
+  h1, p, pre, table, select { margin: 0; }
+  .hidden { display: none; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  a { color: inherit; }
 
   /* ── scrollbars, both engines ───────────────────────────────────────── */
   * { scrollbar-width: thin; scrollbar-color: #2b3648 transparent; }
@@ -76,27 +65,101 @@
   }
   kbd {
     padding: 1px 4px; border-radius: 4px; border: 1px solid rgba(148, 163, 184, 0.16);
-    background: rgba(148, 163, 184, 0.10); color: #94a3b8; font-size: 9px; line-height: 1.5;
+    background: rgba(148, 163, 184, 0.10); color: var(--muted); font-size: 9px; line-height: 1.5;
+  }
+
+  /* ── application shell ──────────────────────────────────────────────── */
+  .app-header {
+    position: relative; z-index: 20; display: flex; flex-wrap: wrap;
+    align-items: center; gap: 8px 16px; padding: 10px 20px;
+    border-bottom: 1px solid var(--line); background: rgba(10, 15, 24, 0.82);
+    backdrop-filter: blur(12px);
+  }
+  @media (max-width: 639px) { .app-header { gap: 8px; padding: 10px 14px; } }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-logo {
+    display: grid; place-items: center; height: 32px; width: 32px; border-radius: 10px;
+    border: 1px solid rgba(34, 211, 238, 0.25); background: rgba(34, 211, 238, 0.08);
+    color: #67e8f9;
+  }
+  .brand-text { line-height: 1.15; }
+  .app-title { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; color: #fff; }
+  .app-sub {
+    margin-top: 1px; font-size: 9.5px; font-weight: 500;
+    text-transform: uppercase; letter-spacing: 0.16em; color: var(--faint);
+  }
+  .app-hints { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  .hint-chip {
+    display: none; align-items: center; gap: 6px; padding: 4px 8px;
+    border-radius: 8px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.02);
+    font-family: var(--mono); font-size: 9.5px; color: var(--faint);
+  }
+  .hint-sep { color: #334155; }
+  @media (min-width: 1024px) { .hint-chip { display: flex; } }
+
+  /* minmax(0, 1fr) on the row, not just min-height: an implicit `auto` row grows
+     to the drawer's full content height and stretches the map with it. */
+  .app-main {
+    display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr);
+    min-height: 0; overflow: hidden;
+  }
+  .pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .pane-map { position: relative; min-height: 56vh; }
+  .pane-drawer { border-top: 1px solid var(--line); background: rgba(10, 15, 24, 0.6); }
+
+  @media (min-width: 1024px) {
+    body { height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+    .app-main { flex: 1 1 auto; grid-template-columns: minmax(0, 1fr) clamp(360px, 32vw, 470px); }
+    .pane-map { min-height: 0; }
+    .pane-drawer { border-top: 0; border-left: 1px solid var(--line); }
   }
 
   /* ── header metric strip ────────────────────────────────────────────── */
+  /* The load-bearing numbers should not vanish on a phone. A sideways-scrolling
+     strip clipped "DISTANCE CO…" mid-word, which reads as a bug rather than as
+     intentional overflow, so small screens get a 3x2 grid instead. */
+  #metric-chips { order: 3; flex: 1 0 100%; }
+  @media (min-width: 640px) { #metric-chips { order: 0; flex: 0 1 auto; } }
+  .metric-strip {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    overflow: hidden; border-radius: 10px; border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.02);
+  }
+  @media (min-width: 640px) {
+    .metric-strip { display: flex; align-items: stretch; }
+  }
   .metric {
     display: flex; flex-direction: column; justify-content: center;
-    padding: 4px 11px; line-height: 1.25; min-width: 0;
+    padding: 4px 11px; line-height: 1.25; min-width: 0; flex: none;
+    border-left: 1px solid var(--line); border-top: 1px solid var(--line);
   }
-  .metric + .metric { border-left: 1px solid var(--line); }
-  #metric-chips { display: none; }
-  @media (min-width: 640px) { #metric-chips { display: flex; align-items: stretch; } }
+  .metric:nth-child(3n+1) { border-left: 0; }
+  .metric:nth-child(-n+3) { border-top: 0; }
+  @media (min-width: 640px) {
+    .metric { border-top: 0; border-left: 1px solid var(--line); }
+    .metric:nth-child(3n+1) { border-left: 1px solid var(--line); }
+    .metric:first-child { border-left: 0; }
+  }
   .metric > b {
     font-family: var(--mono); font-size: 11.5px; font-weight: 500;
-    color: #e2e8f0; letter-spacing: -0.01em; white-space: nowrap;
+    color: var(--fg); letter-spacing: -0.01em; white-space: nowrap;
   }
   .metric > i {
     font-style: normal; font-size: 8.5px; font-weight: 600;
     letter-spacing: 0.11em; text-transform: uppercase; color: var(--dim);
   }
+  @media (max-width: 639px) {
+    .metric { padding: 5px 8px; }
+    .metric > b { font-size: 10.5px; }
+    .metric > i { font-size: 7.5px; letter-spacing: 0.06em; white-space: normal; }
+  }
 
-  /* ── segmented layer control ────────────────────────────────────────── */
+  /* ── map toolbar ────────────────────────────────────────────────────── */
+  .map-toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+    padding: 8px 12px; border-bottom: 1px solid var(--line);
+    background: rgba(8, 11, 18, 0.7);
+  }
   .seg {
     display: inline-flex; align-items: center; gap: 2px; padding: 3px;
     border-radius: 11px; border: 1px solid var(--line); background: rgba(3, 7, 14, 0.55);
@@ -113,26 +176,60 @@
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15), 0 1px 8px rgba(0, 0, 0, 0.40);
   }
   .seg sub { font-size: 7.5px; line-height: 0; }
+  .seg > button.is-mono { font-family: var(--mono); }
+  .seg svg { height: 12px; width: 12px; }
 
+  #layer-note { display: none; align-items: center; min-width: 0; }
   .field-legend { display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .field-legend > .nm { font-family: var(--mono); font-size: 10px; color: var(--muted); white-space: nowrap; }
-  .field-legend > .bar {
-    width: 76px; height: 5px; border-radius: 9999px;
-    border: 1px solid var(--line); flex: none;
+  .field-legend > .nm {
+    font-family: var(--mono); font-size: 10px; color: var(--muted); white-space: nowrap;
   }
-  .field-legend > .rg { font-family: var(--mono); font-size: 9.5px; color: var(--dim); white-space: nowrap; }
+  .field-legend > .bar {
+    width: 76px; height: 5px; border-radius: 9999px; flex: none;
+    border: 1px solid var(--line);
+    background: linear-gradient(90deg, rgba(148,163,184,0.10), rgba(148,163,184,0.36), rgba(248,250,252,0.70));
+  }
+  .field-legend > .rg {
+    font-family: var(--mono); font-size: 9.5px; color: var(--dim); white-space: nowrap;
+  }
+  @media (min-width: 768px) { #layer-note:not(.hidden) { display: flex; } }
 
-  .chip-dot { width: 7px; height: 7px; border-radius: 9999px; display: inline-block; flex: none; }
+  .map-legend {
+    margin-left: auto; display: none; flex-wrap: wrap; align-items: center;
+    gap: 4px 10px; font-size: 9.5px; color: var(--muted);
+  }
+  .legend-item { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .legend-sep { width: 1px; height: 12px; background: rgba(255, 255, 255, 0.10); }
+  .star-glyph { font-size: 11px; line-height: 1; }
+  @media (min-width: 640px) { .map-legend { display: flex; } }
+
+  .map-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  #manifold { position: absolute; inset: 0; }
+  .map-badge {
+    position: absolute; right: 12px; top: 12px; pointer-events: none;
+    padding: 4px 8px; border-radius: 7px; border: 1px solid var(--line);
+    background: rgba(8, 11, 18, 0.72); backdrop-filter: blur(4px);
+    font-family: var(--mono); font-size: 9.5px; color: var(--muted);
+  }
 
   /* ── drawer chrome ──────────────────────────────────────────────────── */
+  .drawer-bar {
+    display: flex; flex-shrink: 0; align-items: center; gap: 6px;
+    padding: 8px 10px; border-bottom: 1px solid var(--line);
+    background: rgba(10, 15, 24, 0.7);
+  }
+  .drawer-body { flex: 1 1 auto; min-height: 0; scrollbar-gutter: stable; }
+  @media (min-width: 1024px) { .drawer-body { overflow-y: auto; } }
+
   .icon-btn {
-    display: inline-grid; place-items: center; height: 28px; width: 28px;
+    display: inline-grid; place-items: center; height: 28px; width: 28px; flex: none;
     border-radius: 8px; border: 1px solid var(--line);
     background: rgba(255, 255, 255, 0.02); color: var(--muted);
     transition: color .16s ease, border-color .16s ease, background-color .16s ease;
   }
   .icon-btn:hover { color: #fff; border-color: var(--line-hi); background: rgba(255, 255, 255, 0.06); }
   .icon-btn:active { transform: translateY(0.5px); }
+  .icon-btn svg { height: 15px; width: 15px; }
 
   .gap-select {
     min-width: 0; flex: 1 1 auto; height: 28px; padding: 0 6px;
@@ -142,16 +239,22 @@
   }
   .gap-select:hover { border-color: var(--line-hi); }
 
-  .radar-panel {
-    border: 1px solid rgba(148, 163, 184, 0.07); border-radius: 10px;
-    background: rgba(255, 255, 255, 0.015);
+  /* ── drawer sections ────────────────────────────────────────────────── */
+  .drawer-body > section {
+    display: block; padding: 12px; border-bottom: 1px solid var(--line);
   }
-
+  .drawer-body > section.sec-gap { padding: 14px 16px; }
+  .sec-head {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+    margin-bottom: 6px; padding: 0 2px;
+  }
   .sh {
     display: inline-flex; align-items: center; gap: 6px;
     font-size: 9.5px; font-weight: 600; letter-spacing: 0.13em;
     text-transform: uppercase; color: var(--faint);
   }
+  .sh svg { height: 12px; width: 12px; flex: none; }
+  .sec-note { font-size: 9px; color: var(--faint); white-space: nowrap; }
 
   .badge {
     display: inline-block; padding: 1px 6px; border-radius: 5px;
@@ -163,8 +266,51 @@
   .badge.arc-B { color: #fcd34d; border-color: rgba(251, 191, 36, 0.32); background: rgba(251, 191, 36, 0.10); }
   .badge.arc-C { color: #d8b4fe; border-color: rgba(192, 132, 252, 0.32); background: rgba(192, 132, 252, 0.10); }
   .badge.warn { color: #fcd34d; border-color: rgba(251, 191, 36, 0.30); background: rgba(251, 191, 36, 0.10); }
+  .badge.emergent { color: #6ee7b7; border-color: rgba(52, 211, 153, 0.30); background: rgba(52, 211, 153, 0.10); }
+  .badge.limited { color: #f9a8d4; border-color: rgba(244, 114, 182, 0.30); background: rgba(244, 114, 182, 0.10); }
 
-  /* ── stat tiles ─────────────────────────────────────────────────────── */
+  /* ── gap headline ───────────────────────────────────────────────────── */
+  .gap-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .gap-headline { display: flex; align-items: center; gap: 10px; }
+  .gap-rank {
+    font-family: var(--mono); font-size: 30px; font-weight: 600; line-height: 1;
+    letter-spacing: -0.02em; color: #fff;
+  }
+  .gap-kicker {
+    font-size: 9.5px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.14em; color: var(--faint);
+  }
+  .gap-badges { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+  .gap-coords {
+    display: flex; align-items: center; gap: 6px; margin-top: 10px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--accent);
+  }
+  .gap-coords svg { height: 12px; width: 12px; color: var(--dim); flex: none; }
+  .gap-ideal { flex: none; text-align: right; }
+  .gap-ideal-label {
+    font-size: 9px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--faint);
+  }
+  .gap-ideal-value {
+    font-family: var(--mono); font-size: 15px; line-height: 1.2; color: var(--fg);
+  }
+
+  /* ── scorecard ──────────────────────────────────────────────────────── */
+  #radar {
+    height: 178px; width: 100%; border-radius: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.07); background: rgba(255, 255, 255, 0.015);
+  }
+  .radar-caption {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 3px 11px;
+    margin-top: 8px; font-family: var(--mono); font-size: 8.5px; color: var(--faint);
+  }
+  .radar-caption > span { white-space: nowrap; }
+  .radar-caption b { font-weight: 600; color: #94a3b8; }
+  .radar-caption b.v { color: #e2e8f0; margin-left: 4px; }
+  .stats-grid {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px; margin-top: 8px;
+  }
   .stat {
     border: 1px solid var(--line); border-radius: 9px;
     background: rgba(255, 255, 255, 0.018); padding: 6px 8px; min-width: 0;
@@ -174,11 +320,11 @@
     text-transform: uppercase; color: var(--dim);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .stat > em { display: block; font-style: normal; font-size: 8px; color: var(--dim); }
   .stat > b {
     display: block; margin-top: 1px; font-family: var(--mono); font-size: 12.5px;
-    font-weight: 500; color: #e2e8f0; letter-spacing: -0.01em;
+    font-weight: 500; color: var(--fg); letter-spacing: -0.01em;
   }
+  .stat > em { display: block; font-style: normal; font-size: 8px; color: var(--dim); }
 
   /* ── regime mixture ─────────────────────────────────────────────────── */
   .mix-bar {
@@ -186,40 +332,63 @@
     background: rgba(148, 163, 184, 0.12);
   }
   .mix-bar > i { display: block; height: 100%; }
+  .mix-list { margin-top: 6px; }
   .mix-row {
     display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center; gap: 8px; padding: 2px 0;
   }
   .mix-row > .nm { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #cbd5e1; }
-  .mix-row > .vl { font-family: var(--mono); font-size: 10.5px; color: #94a3b8; }
-  .mix-row > .ad { font-family: var(--mono); font-size: 9.5px; color: var(--dim); min-width: 3.6em; text-align: right; }
+  .mix-row > .vl { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+  .mix-row > .ad {
+    font-family: var(--mono); font-size: 9.5px; color: var(--dim);
+    min-width: 3.6em; text-align: right;
+  }
+  .chip-dot { width: 7px; height: 7px; border-radius: 9999px; display: inline-block; flex: none; }
 
   /* ── anchor papers ──────────────────────────────────────────────────── */
+  .anchor-list { display: flex; flex-direction: column; gap: 6px; }
   .anchor {
     display: block; text-decoration: none; border: 1px solid var(--line); border-radius: 11px;
     background: rgba(255, 255, 255, 0.017); padding: 8px 9px;
     transition: border-color .16s ease, background-color .16s ease, transform .16s ease;
   }
-  .anchor:hover { border-color: var(--line-hi); background: rgba(255, 255, 255, 0.05); transform: translateY(-1px); }
+  .anchor:hover {
+    border-color: var(--line-hi); background: rgba(255, 255, 255, 0.05);
+    transform: translateY(-1px);
+  }
   .anchor:active { transform: none; }
-  .anchor > .idx {
+  .anchor-row { display: flex; align-items: flex-start; gap: 8px; }
+  .anchor-main { min-width: 0; flex: 1 1 auto; }
+  .anchor .idx {
     display: grid; place-items: center; height: 17px; width: 17px; border-radius: 5px;
-    font-family: var(--mono); font-size: 9px; color: var(--dim);
-    background: rgba(148, 163, 184, 0.10); flex: none;
+    font-family: var(--mono); font-size: 9px; color: var(--dim); flex: none;
+    background: rgba(148, 163, 184, 0.10);
   }
   .anchor .ttl {
     font-size: 12px; line-height: 1.35; color: #e8eef7;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   }
-  .anchor .meta { margin-top: 2px; font-size: 10px; color: var(--dim); }
-  .anchor .wbar { height: 3px; border-radius: 9999px; background: rgba(148, 163, 184, 0.16); overflow: hidden; }
-  .anchor .wbar > i {
+  .anchor .meta {
+    margin-top: 2px; font-size: 10px; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .anchor .foot { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding-left: 25px; }
+  .wbar {
+    height: 3px; border-radius: 9999px; overflow: hidden;
+    background: rgba(148, 163, 184, 0.16); flex: 1 1 auto;
+  }
+  .wbar > i {
     display: block; height: 100%; border-radius: 9999px;
     background: linear-gradient(90deg, #0e7490, #22d3ee);
   }
-  .anchor .wv { font-family: var(--mono); font-size: 9.5px; color: #94a3b8; flex: none; }
+  .wv { font-family: var(--mono); font-size: 9.5px; color: var(--muted); flex: none; }
 
   /* ── lexical lenses ─────────────────────────────────────────────────── */
+  .lens-block + .lens-block { margin-top: 12px; }
+  .lens-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .lens-head > .lbl { font-size: 10.5px; font-weight: 500; color: #cbd5e1; }
+  .lens-head > .hint { font-size: 9px; color: var(--faint); }
+  .chip-list { display: flex; flex-wrap: wrap; gap: 4px; }
   .chip {
     display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px;
     border-radius: 6px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.03);
@@ -231,26 +400,51 @@
   .lens { width: 100%; border-collapse: collapse; }
   .lens tr + tr { border-top: 1px solid rgba(148, 163, 184, 0.07); }
   .lens td { padding: 3px 0; vertical-align: top; }
-  .lens .term { font-family: var(--mono); font-size: 11px; color: #e2e8f0; padding-right: 8px; }
+  .lens .term { font-family: var(--mono); font-size: 11px; color: var(--fg); padding-right: 8px; }
   .lens .df {
     display: inline-block; font-family: var(--mono); font-size: 9px;
-    padding: 0 4px; border-radius: 4px; color: #94a3b8; background: rgba(148, 163, 184, 0.10);
-    white-space: nowrap;
+    padding: 0 4px; border-radius: 4px; color: var(--muted);
+    background: rgba(148, 163, 184, 0.10); white-space: nowrap;
   }
   .lens .src { font-size: 10px; color: var(--faint); }
-  .lens .src a { color: #67e8f9; text-decoration: none; }
-  .lens .src a:hover { text-decoration: underline; }
-  .lens .src b { font-family: var(--mono); font-weight: 400; color: #94a3b8; }
+  .lens .src-line { display: flex; align-items: baseline; gap: 6px; padding: 0.5px 0; }
+  .lens .src-line + .src-line { border-top: 1px solid rgba(148, 163, 184, 0.06); }
+  .lens .src-doc {
+    flex: none; min-width: 8.4em;
+    font-family: var(--mono); font-size: 10px; color: #67e8f9; text-decoration: none;
+  }
+  .lens .src-doc:hover { text-decoration: underline; }
+  .lens .src-w { font-family: var(--mono); font-weight: 400; color: var(--dim); }
 
-  .empty { padding: 5px 1px; font-size: 10px; line-height: 1.5; color: var(--dim); }
+  .empty { padding: 4px 0; font-size: 10px; line-height: 1.5; color: var(--dim); }
+  .empty.tight { margin-top: 4px; }
 
   /* ── prompt block ───────────────────────────────────────────────────── */
+  .prompt-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  .prompt-sub { margin-top: 2px; font-size: 9px; color: var(--faint); }
+  .prompt-actions { display: flex; flex: none; align-items: center; gap: 6px; }
+  .copy-btn {
+    display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px;
+    border-radius: 8px; border: 1px solid rgba(34, 211, 238, 0.30);
+    background: rgba(34, 211, 238, 0.12); color: #a5f3fc;
+    font-size: 11px; font-weight: 500;
+    transition: background-color .16s ease, border-color .16s ease;
+  }
+  .copy-btn:hover { border-color: rgba(34, 211, 238, 0.50); background: rgba(34, 211, 238, 0.20); }
+  .copy-btn svg { height: 14px; width: 14px; }
+  .copy-btn.copied { border-color: rgba(52, 211, 153, 0.45); color: #a7f3d0; }
+
   .prompt {
     max-height: min(340px, 44vh); overflow: auto; overscroll-behavior: contain;
-    margin: 0; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--line);
+    margin-top: 8px; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--line);
     background: rgba(3, 7, 14, 0.72); font-family: var(--mono);
     font-size: 10.5px; line-height: 1.6; color: #b6c2d2;
     white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2;
+  }
+  .prompt-meta {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    margin-top: 4px; padding: 0 2px;
+    font-family: var(--mono); font-size: 9px; color: var(--faint);
   }
 
   /* ── motion ─────────────────────────────────────────────────────────── */
@@ -267,15 +461,16 @@
     transition: opacity .2s ease, transform .2s ease;
   }
   .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast svg { height: 14px; width: 14px; flex: none; }
 
   @media (prefers-reduced-motion: reduce) {
     .fade-in { animation: none; }
-    .toast, .anchor, .seg > button, .icon-btn { transition: none; }
+    .toast, .anchor, .seg > button, .icon-btn, .copy-btn { transition: none; }
     .anchor:hover, .anchor:active { transform: none; }
   }
 </style>
 </head>
-<body class="min-h-screen font-sans text-slate-200 antialiased lg:flex lg:h-screen lg:flex-col lg:overflow-hidden">
+<body>
 
 <script id="radar-data" type="application/json">__RADAR_DATA__</script>
 
@@ -284,187 +479,184 @@
 </noscript>
 
 <!-- ───────────────────────────── header ───────────────────────────── -->
-<header class="z-20 flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-white/[0.06] bg-[#0a0f18]/80 px-4 py-2.5 backdrop-blur-md sm:px-5">
-  <div class="flex items-center gap-2.5">
-    <span class="grid h-8 w-8 place-items-center rounded-[10px] border border-cyan-400/25 bg-cyan-400/[0.08]">
-      <i data-lucide="radar" class="h-4 w-4 text-cyan-300"></i>
-    </span>
-    <div class="leading-[1.15]">
-      <h1 class="text-[13.5px] font-semibold tracking-[-0.01em] text-white">ResearchRadar</h1>
-      <p class="text-[9.5px] font-medium uppercase tracking-[0.16em] text-slate-500">Knowledge Manifold</p>
+<header class="app-header">
+  <div class="brand">
+    <span class="brand-logo"><i data-lucide="radar"></i></span>
+    <div class="brand-text">
+      <h1 class="app-title">ResearchRadar</h1>
+      <p class="app-sub">Knowledge Manifold</p>
     </div>
   </div>
 
-  <div id="metric-chips" class="hidden overflow-hidden rounded-lg border border-white/[0.07] bg-white/[0.02] sm:flex"></div>
+  <div id="metric-chips" class="metric-strip"></div>
 
-  <div class="ml-auto flex items-center gap-2">
-    <span class="hidden items-center gap-1.5 rounded-md border border-white/[0.07] bg-white/[0.02] px-2 py-1 font-mono text-[9.5px] text-slate-500 lg:flex">
+  <div class="app-hints">
+    <span class="hint-chip">
       <kbd>←</kbd><kbd>→</kbd> gap
-      <span class="text-slate-600">·</span>
+      <span class="hint-sep">·</span>
       <kbd>1</kbd>–<kbd>5</kbd> layer
     </span>
   </div>
 </header>
 
-<main class="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_clamp(360px,32vw,470px)]">
+<main class="app-main">
 
   <!-- ──────────────────────── left: manifold ──────────────────────── -->
-  <section class="relative flex min-h-[56vh] flex-col lg:min-h-0">
-    <div class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-white/[0.06] bg-[#080b12]/70 px-3 py-2">
+  <section class="pane pane-map">
+    <div class="map-toolbar">
       <div class="seg" role="group" aria-label="Background field layer">
         <button data-layer="none" aria-pressed="true" title="Hide the field overlay">
-          <i data-lucide="scatter-chart" class="h-3 w-3"></i>Papers
+          <i data-lucide="scatter-chart"></i>Papers
         </button>
-        <button data-layer="P_boundary" aria-pressed="false" class="font-mono" title="Persistent boundary: harmonic mean of the global and adaptive boundary strengths">P<sub>boundary</sub></button>
-        <button data-layer="W" aria-pressed="false" class="font-mono" title="Band-pass white-space novelty">W</button>
-        <button data-layer="G" aria-pressed="false" class="font-mono" title="Semantic gradient norm">G</button>
-        <button data-layer="S" aria-pressed="false" class="font-mono" title="Evidential support">S</button>
+        <button data-layer="P_boundary" aria-pressed="false" class="is-mono" title="Persistent boundary: harmonic mean of the global and adaptive boundary strengths">P<sub>boundary</sub></button>
+        <button data-layer="W" aria-pressed="false" class="is-mono" title="Band-pass white-space novelty">W</button>
+        <button data-layer="G" aria-pressed="false" class="is-mono" title="Semantic gradient norm">G</button>
+        <button data-layer="S" aria-pressed="false" class="is-mono" title="Evidential support">S</button>
       </div>
 
-      <div id="layer-note" class="hidden min-w-0 items-center md:flex"></div>
+      <div id="layer-note"></div>
 
-      <div class="ml-auto hidden flex-wrap items-center gap-x-2.5 gap-y-1 text-[9.5px] text-slate-500 sm:flex">
-        <span class="flex items-center gap-1"><span class="chip-dot" style="background:#22d3ee"></span>SysID</span>
-        <span class="flex items-center gap-1"><span class="chip-dot" style="background:#fbbf24"></span>Sim2Real</span>
-        <span class="flex items-center gap-1"><span class="chip-dot" style="background:#34d399"></span>RL</span>
-        <span class="h-3 w-px bg-white/10"></span>
-        <span class="flex items-center gap-1"><span class="text-[11px] leading-none text-pink-300">★</span>practical gap</span>
-        <span class="flex items-center gap-1"><span class="text-[11px] leading-none text-amber-300">★</span>#1 compromise</span>
+      <div class="map-legend">
+        <span class="legend-item"><span class="chip-dot" style="background:#22d3ee"></span>SysID</span>
+        <span class="legend-item"><span class="chip-dot" style="background:#fbbf24"></span>Sim2Real</span>
+        <span class="legend-item"><span class="chip-dot" style="background:#34d399"></span>RL</span>
+        <span class="legend-sep"></span>
+        <span class="legend-item"><span class="star-glyph" style="color:#f9a8d4">★</span>practical gap</span>
+        <span class="legend-item"><span class="star-glyph" style="color:#fbbf24">★</span>#1 compromise</span>
       </div>
     </div>
 
-    <div class="relative min-h-0 flex-1">
-      <div id="manifold" class="absolute inset-0"></div>
-      <div class="pointer-events-none absolute right-3 top-3 rounded-md border border-white/[0.06] bg-[#080b12]/70 px-2 py-1 font-mono text-[9.5px] text-slate-500 backdrop-blur-sm">
-        Ω = [−1, 1]² · 21×21 · 120 docs
-      </div>
+    <div class="map-stage">
+      <div id="manifold"></div>
+      <div class="map-badge">Ω = [−1, 1]² · 21×21 · 120 docs</div>
     </div>
   </section>
 
   <!-- ───────────────────── right: evidence drawer ───────────────────── -->
-  <aside class="flex min-h-0 flex-col border-t border-white/[0.06] bg-[#0a0f18]/60 lg:border-l lg:border-t-0">
-    <div class="flex shrink-0 items-center gap-1.5 border-b border-white/[0.06] bg-[#0a0f18]/70 px-2.5 py-2">
+  <aside class="pane pane-drawer">
+    <div class="drawer-bar">
       <button id="prev-btn" class="icon-btn" title="Previous gap (left arrow)" aria-label="Previous gap">
-        <i data-lucide="chevron-left" class="h-4 w-4"></i>
+        <i data-lucide="chevron-left"></i>
       </button>
       <button id="next-btn" class="icon-btn" title="Next gap (right arrow)" aria-label="Next gap">
-        <i data-lucide="chevron-right" class="h-4 w-4"></i>
+        <i data-lucide="chevron-right"></i>
       </button>
       <select id="gap-select" class="gap-select" aria-label="Select a Pareto gap"></select>
     </div>
 
-    <div id="drawer-scroll" class="min-h-0 flex-1 lg:overflow-y-auto">
+    <div id="drawer-scroll" class="drawer-body">
 
-      <div class="border-b border-white/[0.06] px-4 py-3.5">
-        <div class="flex items-start justify-between gap-3">
+      <section class="sec-gap">
+        <div class="gap-head">
           <div class="min-w-0">
-            <div class="flex items-center gap-2.5">
-              <span id="gap-rank" class="font-mono text-[30px] font-semibold leading-none tracking-tight text-white">#1</span>
-              <div class="leading-tight">
-                <div class="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-slate-500">Supported gap</div>
-                <div class="mt-1 flex items-center gap-1.5">
+            <div class="gap-headline">
+              <span id="gap-rank" class="gap-rank">#1</span>
+              <div>
+                <div class="gap-kicker">Supported gap</div>
+                <div class="gap-badges">
                   <span id="gap-arch" class="badge"></span>
                   <span id="gap-boundary-badge" class="badge warn hidden">outer edge</span>
                 </div>
               </div>
             </div>
-            <div class="mt-2.5 flex items-center gap-1.5 font-mono text-[11.5px]">
-              <i data-lucide="crosshair" class="h-3 w-3 text-slate-600"></i>
-              <span id="gap-coords" class="text-cyan-300"></span>
+            <div class="gap-coords">
+              <i data-lucide="crosshair"></i>
+              <span id="gap-coords"></span>
             </div>
           </div>
-          <div class="shrink-0 text-right">
-            <div class="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">d_ideal</div>
-            <div id="gap-dideal" class="font-mono text-[15px] leading-tight text-slate-200" title="Euclidean distance to the ideal corner (1, 1, 1, 1)"></div>
+          <div class="gap-ideal">
+            <div class="gap-ideal-label">d_ideal</div>
+            <div id="gap-dideal" class="gap-ideal-value" title="Euclidean distance to the ideal corner (1, 1, 1, 1)"></div>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div class="border-b border-white/[0.06] px-3 py-3">
-        <div class="mb-1 flex items-baseline justify-between gap-2 px-0.5">
-          <span class="sh"><i data-lucide="target" class="h-3 w-3"></i>Objective scorecard</span>
-          <span class="text-[9px] text-slate-500">0–1 · higher is better</span>
+      <section>
+        <div class="sec-head">
+          <span class="sh"><i data-lucide="target"></i>Objective scorecard</span>
+          <span class="sec-note">0–1 · higher is better</span>
         </div>
-        <div id="radar" class="radar-panel h-[196px] w-full"></div>
-        <div id="stats" class="mt-1.5 grid grid-cols-3 gap-1.5"></div>
-      </div>
+        <div id="radar"></div>
+        <div id="radar-caption" class="radar-caption" aria-label="Objective values"></div>
+        <div id="stats" class="stats-grid"></div>
+      </section>
 
-      <div class="border-b border-white/[0.06] px-3 py-3">
-        <div class="mb-1.5 flex items-baseline justify-between gap-2 px-0.5">
-          <span class="sh"><i data-lucide="pie-chart" class="h-3 w-3"></i>Regime mixture</span>
-          <span class="text-[9px] text-slate-500">global / adaptive</span>
+      <section>
+        <div class="sec-head">
+          <span class="sh"><i data-lucide="pie-chart"></i>Regime mixture</span>
+          <span class="sec-note">global / adaptive</span>
         </div>
         <div id="mixture"></div>
-      </div>
+      </section>
 
-      <div class="border-b border-white/[0.06] px-3 py-3">
-        <div class="mb-1.5 flex items-baseline justify-between gap-2 px-0.5">
-          <span class="sh"><i data-lucide="layers" class="h-3 w-3"></i>Anchor papers</span>
-          <span class="text-[9px] text-slate-500">top 5 · SPH weight</span>
+      <section>
+        <div class="sec-head">
+          <span class="sh"><i data-lucide="layers"></i>Anchor papers</span>
+          <span class="sec-note">top 5 · SPH weight</span>
         </div>
-        <div id="anchors" class="space-y-1.5"></div>
-      </div>
+        <div id="anchors" class="anchor-list"></div>
+      </section>
 
-      <div class="border-b border-white/[0.06] px-3 py-3">
-        <div class="mb-2 flex items-baseline justify-between gap-2 px-0.5">
-          <span class="sh"><i data-lucide="type" class="h-3 w-3"></i>Lexical lenses</span>
-          <span class="text-[9px] text-slate-500">local vocabulary</span>
+      <section>
+        <div class="sec-head">
+          <span class="sh"><i data-lucide="type"></i>Lexical lenses</span>
+          <span class="sec-note">local vocabulary</span>
         </div>
 
-        <div class="mb-3">
-          <div class="mb-1.5 flex items-center gap-1.5 px-0.5">
+        <div class="lens-block">
+          <div class="lens-head">
             <span class="chip-dot" style="background:#22d3ee"></span>
-            <span class="text-[10.5px] font-medium text-slate-300">L2 theme lens</span>
-            <span class="text-[9px] text-slate-500">high local mass</span>
+            <span class="lbl">L2 theme lens</span>
+            <span class="hint">high local mass</span>
           </div>
-          <div id="lens-theme" class="flex flex-wrap gap-1"></div>
+          <div id="lens-theme" class="chip-list"></div>
         </div>
 
-        <div class="mb-3">
-          <div class="mb-1.5 flex items-center gap-1.5 px-0.5">
+        <div class="lens-block">
+          <div class="lens-head">
             <span class="chip-dot" style="background:#34d399"></span>
-            <span class="text-[10.5px] font-medium text-slate-300">Emergent shared topics</span>
-            <span class="badge" style="color:#6ee7b7;border-color:rgba(52,211,153,.3);background:rgba(52,211,153,.1)">df ≥ 4</span>
+            <span class="lbl">Emergent shared topics</span>
+            <span class="badge emergent">df ≥ 4</span>
           </div>
           <div id="lens-emergent"></div>
         </div>
 
-        <div>
-          <div class="mb-1.5 flex items-center gap-1.5 px-0.5">
+        <div class="lens-block">
+          <div class="lens-head">
             <span class="chip-dot" style="background:#f472b6"></span>
-            <span class="text-[10.5px] font-medium text-slate-300">Limited-source hypotheses</span>
-            <span class="badge" style="color:#f9a8d4;border-color:rgba(244,114,182,.3);background:rgba(244,114,182,.1)">df ≤ 3</span>
+            <span class="lbl">Limited-source hypotheses</span>
+            <span class="badge limited">df ≤ 3</span>
           </div>
           <div id="lens-limited"></div>
         </div>
-      </div>
+      </section>
 
-      <div class="px-3 py-3">
-        <div class="mb-2 flex items-start justify-between gap-2 px-0.5">
+      <section>
+        <div class="prompt-head">
           <div>
-            <div class="sh"><i data-lucide="sparkles" class="h-3 w-3"></i>Appendix A.1 prompt</div>
-            <div class="mt-0.5 text-[9px] text-slate-500">verbatim template, pre-filled for this gap</div>
+            <div class="sh"><i data-lucide="sparkles"></i>Appendix A.1 prompt</div>
+            <div class="prompt-sub">verbatim template, pre-filled for this gap</div>
           </div>
-          <div class="flex shrink-0 items-center gap-1.5">
+          <div class="prompt-actions">
             <button id="download-btn" class="icon-btn" title="Download prompt as .txt" aria-label="Download prompt">
-              <i data-lucide="download" class="h-3.5 w-3.5"></i>
+              <i data-lucide="download"></i>
             </button>
-            <button id="copy-btn" class="flex items-center gap-1.5 rounded-lg border border-cyan-400/30 bg-cyan-400/[0.12] px-2.5 py-1.5 text-[11px] font-medium text-cyan-200 transition-colors hover:border-cyan-400/50 hover:bg-cyan-400/20">
-              <i data-lucide="copy" class="h-3.5 w-3.5"></i>
+            <button id="copy-btn" class="copy-btn" title="Copy this prompt to the clipboard">
+              <i data-lucide="copy"></i>
               <span id="copy-label">Copy</span>
             </button>
           </div>
         </div>
         <pre id="prompt" class="prompt"></pre>
-        <div id="prompt-meta" class="mt-1 flex items-center justify-between gap-3 px-0.5 font-mono text-[9px] text-slate-600"></div>
-      </div>
+        <div id="prompt-meta" class="prompt-meta"></div>
+      </section>
 
     </div>
   </aside>
 </main>
 
 <div id="toast" class="toast" role="status" aria-live="polite">
-  <i data-lucide="check" class="h-3.5 w-3.5"></i>
+  <i data-lucide="check"></i>
   <span id="toast-text">Copied to clipboard</span>
 </div>
 
@@ -704,10 +896,12 @@ function buildManifold() {
   const xs = gaps.map(function (g) { return g.x; });
   const ys = gaps.map(function (g) { return g.y; });
 
-  /* Soft glow beneath every gap marker. */
+  /* 33 glowing stars at full strength visually drowned the 120 papers they were
+     derived from. The stars now sit just above paper weight and the halo is a
+     whisper, so the corpus stays the dominant texture. */
   index.halo = own("halo", {
     type: "scatter", mode: "markers", x: xs, y: ys, hoverinfo: "skip", showlegend: false,
-    marker: { symbol: "star", size: 27, color: "#f472b6", opacity: 0.16, line: { width: 0 } }
+    marker: { symbol: "star", size: 15, color: "#f472b6", opacity: 0.10, line: { width: 0 } }
   });
 
   /* The clickable gap markers. pointNumber === index into DATA.gaps. */
@@ -716,30 +910,30 @@ function buildManifold() {
     x: xs, y: ys,
     text: gaps.map(gapHover),
     hoverinfo: "text",
-    marker: { symbol: "star", size: 13, color: "#fce7f3", line: { width: 1.2, color: "#f472b6" } },
+    marker: { symbol: "star", size: 11.5, color: "#fdf2f8", line: { width: 0.9, color: "#f472b6" } },
     customdata: gaps.map(function (g) { return g.rank; })
   });
 
   /* #1 compromise: concentric halos in separate traces so they stack. */
-  [62, 42, 27].forEach(function (size, step) {
+  [46, 30, 19].forEach(function (size, step) {
     own("topHalo", {
       type: "scatter", mode: "markers", x: [top.x], y: [top.y], hoverinfo: "skip",
       showlegend: false, name: "top halo " + step,
-      marker: { symbol: "circle", size: size, color: "#fbbf24", opacity: [0.07, 0.12, 0.2][step], line: { width: 0 } }
+      marker: { symbol: "circle", size: size, color: "#fbbf24", opacity: [0.06, 0.10, 0.16][step], line: { width: 0 } }
     });
   });
 
   index.topStar = own("topStar", {
     type: "scatter", mode: "markers", name: "#1 compromise", x: [top.x], y: [top.y],
     text: [gapHover(top)], hoverinfo: "text",
-    marker: { symbol: "star", size: 22, color: "#fbbf24", line: { width: 1.4, color: "#78350f" } }
+    marker: { symbol: "star", size: 17, color: "#fbbf24", line: { width: 1.2, color: "#78350f" } }
   });
 
   /* Selection ring, repositioned with Plotly.restyle. */
   index.selection = own("selection", {
     type: "scatter", mode: "markers", x: [top.x], y: [top.y], hoverinfo: "skip",
     showlegend: false, name: "selection",
-    marker: { symbol: "circle-open", size: 30, color: "#a5f3fc", line: { width: 2 } }
+    marker: { symbol: "circle-open", size: 21, color: "#a5f3fc", line: { width: 2 } }
   });
 
   const layout = {
@@ -754,16 +948,14 @@ function buildManifold() {
       align: "left"
     },
     xaxis: {
-      title: { text: "knowledge manifold x", font: { size: 9.5, color: "#475569" } },
       range: [-1.09, 1.09], zeroline: true, zerolinecolor: "rgba(148,163,184,0.20)",
-      gridcolor: "rgba(148,163,184,0.07)",
+      gridcolor: "rgba(148,163,184,0.07)", showline: false,
       tickfont: { family: "JetBrains Mono, monospace", size: 9, color: "#475569" },
       dtick: 0.5, constrain: "domain"
     },
     yaxis: {
-      title: { text: "knowledge manifold y", font: { size: 9.5, color: "#475569" } },
       range: [-1.09, 1.09], zeroline: true, zerolinecolor: "rgba(148,163,184,0.20)",
-      gridcolor: "rgba(148,163,184,0.07)",
+      gridcolor: "rgba(148,163,184,0.07)", showline: false,
       tickfont: { family: "JetBrains Mono, monospace", size: 9, color: "#475569" },
       dtick: 0.5, scaleanchor: "x", scaleratio: 1
     },
@@ -771,11 +963,20 @@ function buildManifold() {
        align its swatches with text well enough at this size, and the two star
        glyphs need explaining in words. */
     showlegend: false,
+    /* Frame the true problem domain. Because the axes must stay 1:1, a wide pane
+       letterboxes the square plot; the Ω outline turns that leftover space into
+       deliberate margin instead of appearing as an empty canvas. */
+    shapes: [{
+      type: "rect", xref: "x", yref: "y",
+      x0: -1, y0: -1, x1: 1, y1: 1,
+      line: { color: "rgba(148,163,184,0.20)", width: 1 },
+      fillcolor: "rgba(148,163,184,0.022)", layer: "below"
+    }],
     annotations: [{
       x: top.x, y: top.y, text: "#1 compromise",
       showarrow: true, arrowhead: 0, arrowwidth: 1, arrowcolor: "rgba(251,191,36,0.65)",
-      ax: top.x > 0 ? -46 : 46, ay: -34,
-      font: { family: "JetBrains Mono, monospace", size: 10, color: "#fcd34d" },
+      ax: top.x > 0 ? -96 : 96, ay: -30,
+      font: { family: "JetBrains Mono, monospace", size: 9.5, color: "#fcd34d" },
       bgcolor: "rgba(11,15,25,0.85)", bordercolor: "rgba(251,191,36,0.35)",
       borderwidth: 1, borderpad: 3
     }]
@@ -816,27 +1017,46 @@ function statCell(label, value, hint, unit) {
   ]);
 }
 
+function renderRadarCaption(values) {
+  const host = document.getElementById("radar-caption");
+  if (!host) return;
+  const names = ["boundary", "novelty", "gradient", "support"];
+  const letters = ["P", "W", "G", "S"];
+  clear(host);
+  letters.forEach(function (letter, i) {
+    append(host, el("span", {}, [
+      el("b", { text: letter }),
+      el("span", { text: " " + names[i] }),
+      el("b", { class: "v", text: fmt(values[i], 2) })
+    ]));
+  });
+}
+
 function renderRadar(gap) {
   const o = gap.objectives;
   const values = [o.P_boundary, o.W, o.G, o.S];
-  const labels = ["P boundary", "W novelty", "G gradient", "S support"];
+  /* Single-letter theta labels: the full names ("P boundary", "W novelty", …)
+     are ~70px wide each and were being clipped by the drawer's width. The
+     caption row under the chart carries the expansion instead. */
+  const labels = ["P", "W", "G", "S"];
   const color = ARC_COLOR[gap.archetype] || "#22d3ee";
 
   const trace = {
     type: "scatterpolar",
-    mode: "lines+markers+text",
+    mode: "lines+markers",
     r: values.concat([values[0]]),
     theta: labels.concat([labels[0]]),
     fill: "toself",
     fillcolor: hexToRgba(color, 0.18),
     line: { color: color, width: 2 },
     marker: { size: 5, color: color },
-    text: values.map(function (v) { return fmt(v, 2); }).concat([""]),
-    textposition: "middle right",
-    textfont: { family: "JetBrains Mono, monospace", size: 9, color: "#e2e8f0" },
     hoverinfo: "skip",
     showlegend: false
   };
+
+  /* The numbers live in the caption row, not on the vertices: text at the
+     right-hand vertex landed on top of the "P" theta label and read as "0P98". */
+  renderRadarCaption(values);
 
   /* Dashed reference ring at r = 1: the ideal corner this gap is ranked against. */
   const ideal = {
@@ -853,7 +1073,7 @@ function renderRadar(gap) {
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "rgba(0,0,0,0)",
     font: { family: "JetBrains Mono, monospace", size: 9.5, color: "#94a3b8" },
-    margin: { l: 44, r: 44, t: 18, b: 18 },
+    margin: { l: 40, r: 40, t: 16, b: 22 },
     polar: {
       bgcolor: "rgba(148,163,184,0.03)",
       radialaxis: {
@@ -863,7 +1083,7 @@ function renderRadar(gap) {
       },
       angularaxis: {
         gridcolor: "rgba(148,163,184,0.14)",
-        tickfont: { family: "Inter, sans-serif", size: 9.5, color: "#cbd5e1" }
+        tickfont: { family: "JetBrains Mono, monospace", size: 12, color: "#cbd5e1" }
       }
     },
     showlegend: false
@@ -901,7 +1121,7 @@ function renderMixture(gap) {
     return el("i", { style: { width: (100 * r.global / total).toFixed(2) + "%", background: r.color } });
   }));
 
-  const list = el("div", { class: "mt-1.5" }, rows.map(function (r) {
+  const list = el("div", { class: "mix-list" }, rows.map(function (r) {
     return el("div", { class: "mix-row" }, [
       el("span", { class: "nm" }, [
         el("span", { class: "chip-dot", style: { background: r.color } }),
@@ -930,21 +1150,16 @@ function renderAnchors(gap) {
       target: "_blank",
       rel: "noopener noreferrer"
     }, [
-      el("div", { class: "flex items-start gap-2" }, [
+      el("div", { class: "anchor-row" }, [
         el("span", { class: "idx", text: String(position + 1) }),
-        el("div", { class: "min-w-0 flex-1" }, [
+        el("div", { class: "anchor-main" }, [
           el("div", { class: "ttl", text: anchor.title }),
           el("div", {
-            class: "mt-0.5 truncate text-[10px] text-slate-500",
+            class: "meta",
             text: anchor.authors[0] + (anchor.authors.length > 1 ? " et al." : "") + " · " + anchor.year + " · " + anchor.regime
           }),
-          el("div", { class: "mt-1.5 flex items-center gap-1.5" }, [
-            el("span", {
-              class: "shrink-0 rounded px-1 py-[1px] font-mono text-[9px]",
-              style: { background: hexToRgba(color, 0.14), color: color },
-              text: anchor.regime
-            }),
-            el("span", { class: "wbar flex-1" }, [
+          el("div", { class: "foot" }, [
+            el("span", { class: "wbar" }, [
               el("i", { style: { width: Math.max(4, 100 * anchor.weight / maxWeight).toFixed(1) + "%" } })
             ]),
             el("span", { class: "wv", text: fmt(anchor.weight, 4) })
@@ -1006,25 +1221,29 @@ function renderLenses(gap) {
   clear(limitedHost);
   if (gap.limited.length) {
     append(limitedHost, lensTable(gap.limited.map(function (entry) {
-      const sources = (entry.source_docs || []).map(function (source) {
-        return el("span", { class: "mr-2 inline-block" }, [
-          el("a", {
-            class: "text-cyan-400 hover:underline",
-            href: source.url,
-            target: "_blank",
-            rel: "noopener noreferrer",
-            text: source.doc
-          }),
-          el("b", { text: fmt(source.weight, 3) })
-        ]);
-      });
+      /* Drop sub-0.0005 weights: they render as "0.000" and just add line noise
+         to a table that already lists up to four source documents per term. */
+      const sources = (entry.source_docs || [])
+        .filter(function (source) { return source.weight >= 0.0005; })
+        .map(function (source) {
+          return el("span", { class: "src-line" }, [
+            el("a", {
+              class: "src-doc",
+              href: source.url,
+              target: "_blank",
+              rel: "noopener noreferrer",
+              text: source.doc
+            }),
+            el("span", { class: "src-w", text: fmt(source.weight, 3) })
+          ]);
+        });
       return lensRow(
         entry.term, entry.df,
         sources.length ? sources : "not attested in a contributing document"
       );
     })));
     append(limitedHost, el("p", {
-      class: "empty mt-1",
+      class: "empty tight",
       text: "These terms are hypotheses attributed to the listed documents, not established regional knowledge."
     }));
   } else {
@@ -1160,7 +1379,7 @@ async function copyPrompt() {
   }
 
   label.textContent = ok ? "Copied" : "Select all";
-  button.classList.toggle("border-emerald-400/40", ok);
+  button.classList.toggle("copied", ok);
   showToast(ok
     ? "Prompt copied \u2014 " + DATA.gaps[state.gapIndex].filename
     : "Clipboard blocked. The prompt is selected: press Ctrl+C.");
