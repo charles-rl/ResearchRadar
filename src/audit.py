@@ -416,10 +416,14 @@ def check_lens_discipline(parts: dict[str, str], package: dict[str, Any]) -> Fin
     # The first supplied term mentioned must not be an L1-only term.
     body = parts["task_a"].lower()
     positions = [
-        (body.find(name.lower()), "L1", name) for name in l1_only if name and name.lower() in body
+        (body.find(name.lower()), "L1", name)
+        for name in l1_only
+        if name and name.lower() in body
     ]
     positions += [
-        (body.find(name.lower()), "L2", name) for name in theme if name and name.lower() in body
+        (body.find(name.lower()), "L2", name)
+        for name in theme
+        if name and name.lower() in body
     ]
     positions = [entry for entry in positions if entry[0] >= 0]
     positions.sort()
@@ -692,7 +696,9 @@ def audit_response(
     }
 
 
-def load_evidence_package(rank: int, config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
+def load_evidence_package(
+    rank: int, config_path: Path = DEFAULT_CONFIG
+) -> dict[str, Any]:
     """Load the evidence package for one ranked practical gap.
 
     Packages are regenerated from the same inputs the report used, so this works
@@ -708,7 +714,9 @@ def load_evidence_package(rank: int, config_path: Path = DEFAULT_CONFIG) -> dict
     for solution in front["solutions"]:
         if int(solution["rank"]) == rank:
             return packages[int(solution["grid_index"])]
-    raise SystemExit(f"No practical gap with rank {rank}; the front has {len(packages)}.")
+    raise SystemExit(
+        f"No practical gap with rank {rank}; the front has {len(packages)}."
+    )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -758,8 +766,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2))
     else:
         print(f"Appendix A.2 audit of {args.input}")
-        print(f"Task A {report['word_counts']['task_a']} words, "
-              f"Task B {report['word_counts']['task_b']} words")
+        print(
+            f"Task A {report['word_counts']['task_a']} words, "
+            f"Task B {report['word_counts']['task_b']} words"
+        )
         print()
         for finding in report["findings"]:
             mark = "PASS" if finding["passed"] else "FAIL"

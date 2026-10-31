@@ -41,13 +41,29 @@ def make_package() -> dict[str, object]:
     """A minimal but realistic evidence package."""
     return {
         "theme_lens_L2": [
-            {"term": "identification", "df": 88, "word_forms": ["identification", "identified"]},
+            {
+                "term": "identification",
+                "df": 88,
+                "word_forms": ["identification", "identified"],
+            },
             {"term": "learning", "df": 104, "word_forms": ["learning", "learned"]},
-            {"term": "control", "df": 112, "word_forms": ["control", "controls", "controller"]},
+            {
+                "term": "control",
+                "df": 112,
+                "word_forms": ["control", "controls", "controller"],
+            },
         ],
         "concentration_lens_L1": [
-            {"term": "scattering", "df": 2, "source_docs": [{"doc": "doc 12", "weight": 0.3}]},
-            {"term": "armax", "df": 1, "source_docs": [{"doc": "doc 89", "weight": 0.2}]},
+            {
+                "term": "scattering",
+                "df": 2,
+                "source_docs": [{"doc": "doc 12", "weight": 0.3}],
+            },
+            {
+                "term": "armax",
+                "df": 1,
+                "source_docs": [{"doc": "doc 89", "weight": 0.2}],
+            },
             {"term": "identifiability", "df": 9, "source_docs": []},
         ],
         "effective_contributing_documents": 17.63,
@@ -88,9 +104,7 @@ def compliant_response() -> str:
     used = ["identification 88", "learning 104", "control 112"]
     used += ["scattering 2", "armax 1", "identifiability 9"]
     return (
-        f"Task A\n{task_a}\n\n"
-        f"Task B\n{task_b}\n\n"
-        f"Evidence used: {', '.join(used)}.\n"
+        f"Task A\n{task_a}\n\nTask B\n{task_b}\n\nEvidence used: {', '.join(used)}.\n"
     )
 
 
@@ -144,7 +158,9 @@ def test_length_compliance_accepts_a_compliant_response() -> None:
 
 
 def test_length_compliance_rejects_task_a_below_the_window() -> None:
-    parts = split_response(f"Task A\n{'word ' * 50}\n\nTask B\n{'word ' * TASK_B_WORDS}\n")
+    parts = split_response(
+        f"Task A\n{'word ' * 50}\n\nTask B\n{'word ' * TASK_B_WORDS}\n"
+    )
     finding = check_length(parts)
     assert not finding.passed
     low, high = TASK_A_RANGE
@@ -152,7 +168,9 @@ def test_length_compliance_rejects_task_a_below_the_window() -> None:
 
 
 def test_length_compliance_rejects_task_a_above_the_window() -> None:
-    parts = split_response(f"Task A\n{'word ' * 300}\n\nTask B\n{'word ' * TASK_B_WORDS}\n")
+    parts = split_response(
+        f"Task A\n{'word ' * 300}\n\nTask B\n{'word ' * TASK_B_WORDS}\n"
+    )
     assert not check_length(parts).passed
 
 
@@ -231,7 +249,9 @@ def test_coverage_matches_attested_word_forms_not_just_the_lemma() -> None:
 
 
 def test_lens_discipline_passes_when_an_l2_term_opens_the_text() -> None:
-    finding = check_lens_discipline(split_response(compliant_response()), make_package())
+    finding = check_lens_discipline(
+        split_response(compliant_response()), make_package()
+    )
     assert finding.passed, finding.detail
 
 
@@ -321,14 +341,18 @@ def test_unsupported_claims_pass_on_a_fully_hedged_answer() -> None:
 def test_unsupported_claims_flag_unhedged_mechanisms_numbers_and_citations(
     sentence: str,
 ) -> None:
-    finding = check_unsupported_claims({"task_a": sentence, "task_b": "", "evidence_used": ""})
+    finding = check_unsupported_claims(
+        {"task_a": sentence, "task_b": "", "evidence_used": ""}
+    )
     assert not finding.passed, sentence
     assert finding.evidence
 
 
 def test_unsupported_claims_accepts_a_hedged_version_of_the_same_sentence() -> None:
     hedged = "The proposed method may improve tracking accuracy, but this is not established."
-    finding = check_unsupported_claims({"task_a": hedged, "task_b": "", "evidence_used": ""})
+    finding = check_unsupported_claims(
+        {"task_a": hedged, "task_b": "", "evidence_used": ""}
+    )
     assert finding.passed, finding.detail
 
 
@@ -339,7 +363,9 @@ def test_unsupported_claims_treats_the_required_caveat_as_a_hedge() -> None:
         "documents, indicating broad support but not direct evidence for a real paper "
         "at this map location."
     )
-    finding = check_unsupported_claims({"task_a": caveat, "task_b": "", "evidence_used": ""})
+    finding = check_unsupported_claims(
+        {"task_a": caveat, "task_b": "", "evidence_used": ""}
+    )
     assert finding.passed, finding.detail
 
 

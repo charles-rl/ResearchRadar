@@ -322,18 +322,77 @@ reading the template.
 - **An `overflow: hidden` strip clips mid-word.** Making the header metrics
   sideways-scrollable on phones cut "DISTANCE CO…" in half, which reads as a bug
   rather than an affordance. Below 640 px the strip is a 3x2 grid instead.
+- **A seed has no `arxiv.org/abs/` link to build.** The dashboard and report
+  originally derived a paper URL as `arxiv.org/abs/{paper["id"]}`. Seeding papers
+  are local PDFs: five carry an arXiv id in the filename, the rest were resolved
+  by title match, and a seed with no match has a `seed:` identifier. A
+  `seed:td-jepa` URL is a dead link that looks like a working one, so
+  `src/common.py` exposes `paper_source_url()`, which returns `""` for those and
+  each renderer falls back to plain text.
+- **Anchor tables keyed on `doc`, not on the arXiv id.** Once a paper has both a
+  `doc N` label and an `id`, building a link from the label produces
+  `arxiv.org/abs/doc 12`. The `doc N` label is for citation (Appendix A.1
+  requires `[doc N]`); the link must come from the record's own `source` field.
+- **Unicode alphanumeric ratio, not an ASCII class.** The extraction quality gate
+  first counted `[A-Za-z0-9]`. Greek letters in equations are letters, so
+  equation-dense control papers were rejected as "symbol soup" (one SysID paper
+  scored 0.6607). Counting with `char.isalnum()` keeps them, and the ratio is
+  taken over **non-whitespace** characters, because whitespace inflated the
+  denominator on two-column PDFs.
+- **`min(seed_years)` needs a floor and a ceiling.** The window
+  `min(seed_year) - 2` alone lets one old seed drag the harvest back a decade,
+  leaving the corpus temporally split. It is clamped to a 10-year lookback, and a
+  seed whose year cannot be recovered is excluded from `min()` rather than
+  treated as year 0.
+- **A seed's own arXiv id must be pre-registered as seen.** Otherwise a seed that
+  is itself in the harvest window is fetched again and enters the corpus twice —
+  once as `doc N` (`is_seed: true`) and once as a harvested paper. The dedupe set
+  is seeded with every seed identifier before the first query.
+- **Similarity on full text is too blunt to assign a regime.** Matching a seed
+  against a regime centroid using all 6000 words gave top cosines of 0.006–0.059
+  and 11 of 15 ambiguous margins, because method detail and notation are shared
+  across regimes. Using the title plus abstract lifts the top cosine to
+  0.030–0.195 and roughly halves the ambiguity, since the abstract is the paper's
+  own statement of its topic.
 - **A stray `}` kills the whole inline script.** One extra closing brace after
   `showToast()` produced `SyntaxError: Unexpected token '}'` and every
   assertion in the smoke test failed at once, including ones unrelated to the
   change. The template is re-checked with the nesting linter after each edit.
+- **Single-linkage chaining can collapse an entire Pareto front into one
+  archetype.** The practical front is a connected band of grid points about one
+  step (0.1) apart. Single linkage reaches every point from every other through
+  a chain of short hops, so at a 0.35 radius all 64 practical solutions landed
+  in a single archetype and the deep-dive section became meaningless rather than
+  crashing. `group_archetypes` uses complete linkage instead: two clusters merge
+  only when *every* cross-pair distance is inside the radius, which keeps an
+  archetype a compact region as Sec. 4.7 intends. `tests/test_pareto.py` pins
+  both the non-chaining property and agreement with a brute-force reference.
+- **Two payload keys can silently blank a whole panel.** The dashboard's regime
+  mixture read `entry.global` / `entry.adaptive`, but the evidence package nests
+  the three Eq. 6 views as `k5_global` / `k8_global` / `k8_adaptive`. Every
+  column rendered an em dash; nothing threw, and the panel still had the right
+  size and heading. The smoke test now asserts three numeric values per regime
+  rather than merely that the panel exists.
+- **A stale header chip is a factual error, not a cosmetic one.** The header
+  kept advertising `F2LLM-4B` as the embedding model long after the pipeline
+  moved to character n-gram TF-IDF. It now reports the seeding-paper count and
+  distance correlation, both of which are derived from the artifacts that were
+  actually generated.
+- **`git checkout -- <file>` discards the working change, not just the
+  corruption.** Recovering a file mangled by an in-place rewrite lost the
+  seed-aware edits that had been made in the same session, because nothing had
+  been committed yet. Commit a stage before attempting repair surgery on it.
 
 ## Offline verification
 
 All stages verify without network access and exit non-zero on failure:
 
 ```bash
-.venv/bin/python -m src.harvest  --verify-only   # 40/40/40, unique ids + titles
-.venv/bin/python -m src.harvest  --verify-fulltext  # 120 papers, 0 remnants
+# `--verify-only` covers Phase 1 metadata; `--verify-fulltext` covers the
+# full-text corpus. A regime holds 35 harvested papers plus its seeds, so the
+# totals are 45 / 40 / 35 rather than a flat 40 each.
+.venv/bin/python -m src.harvest  --verify-only   # 35/35/35 harvested, sequential docs
+.venv/bin/python -m src.harvest  --verify-fulltext  # 120 = 15 seeds + 105, 0 remnants
 .venv/bin/python -m src.embed    --verify-only   # shape, finiteness, unit norm
 .venv/bin/python -m src.manifold --verify-only   # grid, anchors, objective ranges
 .venv/bin/python -m src.pareto   --verify-only   # dominance, ranking, archetypes
@@ -345,10 +404,13 @@ node tests/dashboard_smoke.js output/index.html  # dashboard script under a DOM 
 The dashboard check confirms there is no local asset path, no `fetch()` or
 `XMLHttpRequest`, and that the embedded `#1` prompt is byte-identical to
 `output/KMO_PROMPT_TOP1.txt`. The Node harness executes the page's own inline
-script against the real payload under a minimal DOM shim: it asserts 120 papers
-across 3 regimes, the payload's own gap count, 4 hidden 21x21 field layers, the field
-orientation, the closed 4-axis radar, the 5 anchor links, gap stepping, the
-click handler, and that a layer toggle keeps every marker trace visible. The
+script against the real payload under a minimal DOM shim. It asserts that the
+three regime traces plus the seeding-paper trace account for all 120 papers, that
+the seeds are drawn as hollow diamonds and match the payload's own `is_seed`
+flags, the payload's gap count, 4 hidden 21x21 field layers, the field
+orientation, the closed 4-axis radar, three numeric mixture values per regime,
+the 5 anchor links, gap stepping, the click handler, and that a layer toggle
+keeps every marker trace visible. The
 harness reads expected counts and coordinates out of the embedded payload rather
 than hard-coding them, so a corpus change does not silently invalidate it.
 
@@ -358,8 +420,14 @@ behaviour is pinned by `tests/test_audit.py` instead, which drives all eight
 checks through both directions — a compliant answer passes all eight, and each
 violation is caught by the item that owns it.
 
-`pytest` covers what is expensive to get wrong and cheap to check: the 68
-sanitiser cases, the n-gram matrix and word index, the eight Appendix A.2 checks,
-and the equations that invite a plausible-but-wrong implementation (the Eq. 21
-worked example, the `q60 <= d_nn <= q85` plateau, and the central-difference
-gradient).
+`pytest` runs 220 tests and covers what is expensive to get wrong and cheap to
+check: 68 sanitiser cases, 31 Seed-First cases (year inference, the harvest
+window floor and ceiling, title keys, front-matter parsing), 26 for the n-gram
+matrix and whole-word index, 44 for the eight Appendix A.2 checks, 35 for the
+manifold, and 16 for Pareto dominance and archetype grouping. Two of those groups
+exist because the bug they catch produced a plausible number rather than an
+exception: the dominance broadcast orientation (a transposed operand order
+reports "dominates something" instead of "is dominated") and archetype chaining
+(single linkage merges a connected band into one cluster). Eq. 21's worked
+example, the `q60 <= d_nn <= q85` plateau, and the central-difference gradient
+are pinned for the same reason.

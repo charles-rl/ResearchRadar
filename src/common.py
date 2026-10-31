@@ -41,9 +41,7 @@ class Paths:
 def configure_logging(level: str = "INFO") -> None:
     """Install a consistent stdout log format for pipeline stages."""
     if logging.getLogger().handlers:
-        logging.getLogger().setLevel(
-            getattr(logging, str(level).upper(), logging.INFO)
-        )
+        logging.getLogger().setLevel(getattr(logging, str(level).upper(), logging.INFO))
         return
     logging.basicConfig(
         level=getattr(logging, str(level).upper(), logging.INFO),
@@ -61,7 +59,9 @@ def load_config(config_path: Path) -> dict[str, Any]:
     except FileNotFoundError as exc:
         raise SystemExit(f"Config file not found: {config_path}") from exc
     except yaml.YAMLError as exc:
-        raise SystemExit(f"Config file is not valid YAML ({config_path}): {exc}") from exc
+        raise SystemExit(
+            f"Config file is not valid YAML ({config_path}): {exc}"
+        ) from exc
     if not isinstance(config, dict):
         raise SystemExit(f"Config file must contain a mapping: {config_path}")
     return config
@@ -99,11 +99,34 @@ def resolve_paths(config: dict[str, Any], config_path: Path) -> Paths:
         dashboard=config_dir
         / str(output_cfg.get("dashboard_path", "output/index.html")),
         dashboard_template=config_dir
-        / str(
-            output_cfg.get("dashboard_template", "templates/dashboard.html")
-        ),
+        / str(output_cfg.get("dashboard_template", "templates/dashboard.html")),
         prompt_payload=config_dir
         / str(output_cfg.get("prompt_path", "output/KMO_PROMPT_TOP1.txt")),
         prompt_template=config_dir
         / str(output_cfg.get("prompt_template", "docs/kmo_prompt_template_A1.txt")),
     )
+
+
+def paper_source_url(paper: dict[str, Any]) -> str:
+    """Public link for one corpus paper, or an empty string when none exists.
+
+    Harvested papers are arXiv entries and always resolve.  A seeding paper is a
+    local PDF: it carries an arXiv identifier only when its filename did, and
+    free-form filenames (``TD JEPA.pdf``) are given a ``seed:`` identifier that
+    no public service knows.  Returning an empty string lets each renderer fall
+    back to plain text instead of emitting a dead link.
+    """
+    identifier = str(paper.get("id", ""))
+    if not identifier or identifier.startswith("seed:"):
+        return ""
+    return f"https://arxiv.org/abs/{identifier}"
+
+
+def is_seed_paper(paper: dict[str, Any]) -> bool:
+    """True for the seeding papers that founded the corpus."""
+    return bool(paper.get("is_seed", False))
+
+
+def paper_provenance(paper: dict[str, Any]) -> str:
+    """Short human label for where a paper came from."""
+    return "seed" if is_seed_paper(paper) else "harvested"

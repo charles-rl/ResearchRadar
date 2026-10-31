@@ -200,6 +200,13 @@
   }
   .legend-item { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
   .legend-sep { width: 1px; height: 12px; background: rgba(255, 255, 255, 0.10); }
+  .diamond-glyph {
+    width: 8px;
+    height: 8px;
+    transform: rotate(45deg);
+    border: 1.5px solid #cbd5e1;
+    display: inline-block;
+  }
   .star-glyph { font-size: 11px; line-height: 1; }
   @media (min-width: 640px) { .map-legend { display: flex; } }
 
@@ -333,10 +340,18 @@
   }
   .mix-bar > i { display: block; height: 100%; }
   .mix-list { margin-top: 6px; }
-  .mix-row {
-    display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+  .mix-row, .mix-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 3.4em 3.4em 3.4em;
     align-items: center; gap: 8px; padding: 2px 0;
   }
+  .mix-head {
+    margin-top: 4px; padding-bottom: 1px;
+    font-family: var(--mono); font-size: 9px; color: var(--dim);
+    letter-spacing: 0.03em; text-align: right;
+    border-bottom: 1px solid var(--line);
+  }
+  .mix-head > :first-child { text-align: left; }
   .mix-row > .nm { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #cbd5e1; }
   .mix-row > .vl { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
   .mix-row > .ad {
@@ -417,7 +432,20 @@
   .lens .src-w { font-family: var(--mono); font-weight: 400; color: var(--dim); }
 
   .empty { padding: 4px 0; font-size: 10px; line-height: 1.5; color: var(--dim); }
-  .empty.tight { margin-top: 4px; }
+  .anchor.no-link { cursor: default; }
+.anchor.no-link:hover { background: var(--card-hi); }
+.meta .badge.seed {
+  margin-left: 6px;
+  padding: 0 5px;
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #a5f3fc;
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  border-radius: 4px;
+  background: rgba(34, 211, 238, 0.08);
+}
+.empty.tight { margin-top: 4px; }
 
   /* ── prompt block ───────────────────────────────────────────────────── */
   .prompt-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
@@ -521,6 +549,7 @@
         <span class="legend-item"><span class="chip-dot" style="background:#fbbf24"></span>Sim2Real</span>
         <span class="legend-item"><span class="chip-dot" style="background:#34d399"></span>RL</span>
         <span class="legend-sep"></span>
+        <span class="legend-item"><span class="diamond-glyph"></span>seeding paper</span>
         <span class="legend-item"><span class="star-glyph" style="color:#f9a8d4">★</span>practical gap</span>
         <span class="legend-item"><span class="star-glyph" style="color:#fbbf24">★</span>#1 compromise</span>
       </div>
@@ -786,14 +815,13 @@ function icons() {
 /* ────────────────────────── header metrics ────────────────────────── */
 function renderHeader() {
   const meta = DATA.meta;
-  const model = String(meta.model).split("/").pop();
   const metrics = [
     [String(meta.papers), "papers"],
+    [String(meta.seeds), "seeding papers"],
     [String(meta.gaps), "practical gaps"],
     [String(meta.archetypes), "archetypes"],
     [fmt(meta.stress, 1), "stress"],
-    ["\u03c1 " + fmt(meta.spearman, 3), "distance corr."],
-    [model, "embedding model"]
+    ["\u03c1 " + fmt(meta.spearman, 3), "distance corr."]
   ];
   const host = document.getElementById("metric-chips");
   clear(host);
@@ -825,26 +853,55 @@ function heatmapTrace(field, axis) {
   };
 }
 
+function paperHover(p) {
+  return "<b>" + esc(p.title) + "</b><br>" +
+    esc(p.authors.join(", ")) + (p.author_count > 3 ? " et al." : "") + "<br>" +
+    p.year + " \u00b7 " + esc(p.regime_label) +
+    (p.is_seed ? " \u00b7 seeding paper" : "") + "<br>" +
+    '<span style="color:#94a3b8">' +
+    (p.is_seed ? esc(p.id) : "arXiv " + esc(p.id)) + "</span>";
+}
+
+/* Harvested papers keep the filled regime circle.  Seeds are drawn separately
+   as a hollow diamond so their 15 positions can be read against the 33 gaps
+   without adding a fourth hue - the shape carries the distinction. */
 function paperTrace(regime) {
-  const rows = DATA.papers.filter(function (paper) { return paper.regime_label === regime.label; });
+  const rows = DATA.papers.filter(function (paper) {
+    return paper.regime_label === regime.label && !paper.is_seed;
+  });
   return {
     type: "scatter",
     mode: "markers",
     name: regime.label,
     x: rows.map(function (p) { return p.x; }),
     y: rows.map(function (p) { return p.y; }),
-    text: rows.map(function (p) {
-      return "<b>" + esc(p.title) + "</b><br>" +
-        esc(p.authors.join(", ")) + (p.author_count > 3 ? " et al." : "") + "<br>" +
-        p.year + " · " + esc(p.regime_label) + "<br>" +
-        '<span style="color:#94a3b8">arXiv ' + esc(p.id) + "</span>";
-    }),
+    text: rows.map(paperHover),
     hoverinfo: "text",
     marker: {
       size: 8.5,
       color: regime.color,
       opacity: 0.88,
       line: { width: 1, color: "rgba(8,11,18,0.92)" }
+    },
+    showlegend: false
+  };
+}
+
+function seedTracer() {
+  const rows = DATA.papers.filter(function (paper) { return paper.is_seed; });
+  return {
+    type: "scatter",
+    mode: "markers",
+    name: "Seeding papers",
+    x: rows.map(function (p) { return p.x; }),
+    y: rows.map(function (p) { return p.y; }),
+    text: rows.map(paperHover),
+    hoverinfo: "text",
+    marker: {
+      symbol: "diamond-open",
+      size: 11,
+      color: rows.map(function (p) { return REGIME_COLOR[p.regime_label] || "#94a3b8"; }),
+      line: { width: 2, color: rows.map(function (p) { return REGIME_COLOR[p.regime_label] || "#94a3b8"; }) }
     },
     showlegend: false
   };
@@ -890,6 +947,8 @@ function buildManifold() {
     const key = "regime:" + regime.label;
     index[key] = own(key, paperTrace(regime));
   });
+
+  index.seeds = own("seeds", seedTracer());
 
   const gaps = DATA.gaps;
   const top = gaps[0];
@@ -1111,15 +1170,36 @@ function renderStats(gap) {
 }
 
 function renderMixture(gap) {
+  /* Three mixtures are reported, per Eq. 6: the K=5 Discovery-level global
+     field, the K=8 Reference-level global field, and the K=8 adaptive-bandwidth
+     field.  The stacked bar shows the K=5 view because that is the level the
+     discovery objectives are defined at; the table shows all three so the
+     adaptive field's redistribution is visible rather than hidden. */
   const rows = DATA.regimes.map(function (regime) {
-    const entry = gap.mixture[regime.label] || { global: 0, adaptive: 0 };
-    return { label: regime.label, color: regime.color, global: entry.global, adaptive: entry.adaptive };
+    const entry = gap.mixture[regime.label] || {};
+    return {
+      label: regime.label,
+      color: regime.color,
+      k5: Number(entry.k5_global || 0),
+      k8: Number(entry.k8_global || 0),
+      ad: Number(entry.k8_adaptive || 0)
+    };
   });
-  const total = rows.reduce(function (sum, r) { return sum + r.global; }, 0) || 1;
+  const total = rows.reduce(function (sum, r) { return sum + r.k5; }, 0) || 1;
 
   const bar = el("div", { class: "mix-bar" }, rows.map(function (r) {
-    return el("i", { style: { width: (100 * r.global / total).toFixed(2) + "%", background: r.color } });
+    return el("i", {
+      style: { width: (100 * r.k5 / total).toFixed(2) + "%", background: r.color },
+      title: r.label + " " + fmt(r.k5, 3) + " (K=5 global)"
+    });
   }));
+
+  const head = el("div", { class: "mix-head" }, [
+    el("span", { text: "" }),
+    el("span", { text: "K=5 g", title: "K=5 Discovery-level global field" }),
+    el("span", { text: "K=8 g", title: "K=8 Reference-level global field" }),
+    el("span", { text: "K=8 a", title: "K=8 adaptive-bandwidth field" })
+  ]);
 
   const list = el("div", { class: "mix-list" }, rows.map(function (r) {
     return el("div", { class: "mix-row" }, [
@@ -1127,14 +1207,15 @@ function renderMixture(gap) {
         el("span", { class: "chip-dot", style: { background: r.color } }),
         el("span", { text: r.label })
       ]),
-      el("span", { class: "vl", title: "global SPH field", text: fmt(r.global, 3) }),
-      el("span", { class: "ad", title: "adaptive 8-NN bandwidth field", text: fmt(r.adaptive, 3) })
+      el("span", { class: "vl", text: fmt(r.k5, 3) }),
+      el("span", { class: "vl", text: fmt(r.k8, 3) }),
+      el("span", { class: "ad", text: fmt(r.ad, 3) })
     ]);
   }));
 
   const host = document.getElementById("mixture");
   clear(host);
-  append(host, [bar, list]);
+  append(host, [bar, head, list]);
 }
 
 function renderAnchors(gap) {
@@ -1144,20 +1225,23 @@ function renderAnchors(gap) {
 
   gap.anchors.forEach(function (anchor, position) {
     const color = REGIME_COLOR[anchor.regime] || "#94a3b8";
-    append(host, el("a", {
-      class: "anchor",
-      href: anchor.url,
-      target: "_blank",
-      rel: "noopener noreferrer"
+    /* A seeding paper may be a local PDF with no public record; render it as a
+       plain block instead of an anchor so there is no dead link to arXiv. */
+    const linkable = Boolean(anchor.url);
+    append(host, el(linkable ? "a" : "div", {
+      class: "anchor" + (linkable ? "" : " no-link"),
+      href: anchor.url || null,
+      target: linkable ? "_blank" : null,
+      rel: linkable ? "noopener noreferrer" : null
     }, [
       el("div", { class: "anchor-row" }, [
         el("span", { class: "idx", text: String(position + 1) }),
         el("div", { class: "anchor-main" }, [
           el("div", { class: "ttl", text: anchor.title }),
-          el("div", {
-            class: "meta",
-            text: anchor.authors[0] + (anchor.authors.length > 1 ? " et al." : "") + " · " + anchor.year + " · " + anchor.regime
-          }),
+          el("div", { class: "meta" }, [
+            el("span", { text: anchor.authors[0] + (anchor.authors.length > 1 ? " et al." : "") + " \u00b7 " + anchor.year + " \u00b7 " + anchor.regime }),
+            anchor.is_seed ? el("span", { class: "badge seed", title: "Seeding paper that founded the corpus", text: "seed" }) : null
+          ]),
           el("div", { class: "foot" }, [
             el("span", { class: "wbar" }, [
               el("i", { style: { width: Math.max(4, 100 * anchor.weight / maxWeight).toFixed(1) + "%" } })
@@ -1226,14 +1310,17 @@ function renderLenses(gap) {
       const sources = (entry.source_docs || [])
         .filter(function (source) { return source.weight >= 0.0005; })
         .map(function (source) {
+          const label = source.doc + (source.is_seed ? " [seed]" : "");
           return el("span", { class: "src-line" }, [
-            el("a", {
-              class: "src-doc",
-              href: source.url,
-              target: "_blank",
-              rel: "noopener noreferrer",
-              text: source.doc
-            }),
+            source.url
+              ? el("a", {
+                  class: "src-doc",
+                  href: source.url,
+                  target: "_blank",
+                  rel: "noopener noreferrer",
+                  text: label
+                })
+              : el("span", { class: "src-doc", text: label }),
             el("span", { class: "src-w", text: fmt(source.weight, 3) })
           ]);
         });

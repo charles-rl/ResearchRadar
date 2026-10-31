@@ -252,9 +252,9 @@ def constrained_stress(
     embedded = final_dist[pair_mask]
     # Shepard-style agreement between embedding and true distances.
     corr = float(
-        np.corrcoef(
-            np.argsort(np.argsort(original)), np.argsort(np.argsort(embedded))
-        )[0, 1]
+        np.corrcoef(np.argsort(np.argsort(original)), np.argsort(np.argsort(embedded)))[
+            0, 1
+        ]
     )
     LOGGER.info(
         "Stress minimization: final stress=%.5f, Spearman(distance)=%.4f, "
@@ -293,9 +293,7 @@ def cluster_labels(z_l2: sp.spmatrix, k: int) -> NDArray[np.int64]:
     return labels
 
 
-def build_manifold(
-    gram: NDArray[np.float64], config: dict[str, Any]
-) -> Manifold:
+def build_manifold(gram: NDArray[np.float64], config: dict[str, Any]) -> Manifold:
     """Construct the frozen Knowledge Manifold, including the K=5 and K=8 views."""
     manifold_cfg = config.get("manifold", {})
     n_perimeter = int(manifold_cfg.get("perimeter_anchors", 8))
@@ -433,7 +431,9 @@ def boundary_strength(
     return entropy, gap
 
 
-def boundary_score(entropy: NDArray[np.float64], gap: NDArray[np.float64]) -> NDArray[np.float64]:
+def boundary_score(
+    entropy: NDArray[np.float64], gap: NDArray[np.float64]
+) -> NDArray[np.float64]:
     """``B_K = 0.65 N_+(H_K) + 0.35 N_-(Dp_K)`` (Eq. 11)."""
     normalized_entropy, _ = normalize_percentile(entropy)
     normalized_gap, _ = normalize_percentile(gap)
@@ -452,7 +452,9 @@ def persistent_boundary(views: dict[str, NDArray[np.float64]]) -> NDArray[np.flo
     positive = stack > 0.0
     reciprocals = np.where(positive, 1.0 / np.where(positive, stack, 1.0), np.inf)
     total = reciprocals.sum(axis=1)
-    return np.where(np.isfinite(total), len(ordered) / np.where(np.isfinite(total), total, 1.0), 0.0)
+    return np.where(
+        np.isfinite(total), len(ordered) / np.where(np.isfinite(total), total, 1.0), 0.0
+    )
 
 
 def band_pass_whitespace(
@@ -516,7 +518,9 @@ def empirical_dnn_quantiles(
     }
 
 
-def _difference_pairs(grid_size: int) -> tuple[NDArray[np.int64], NDArray[np.int64], NDArray[np.float64]]:
+def _difference_pairs(
+    grid_size: int,
+) -> tuple[NDArray[np.int64], NDArray[np.int64], NDArray[np.float64]]:
     """Neighbour pairs and divisors matching ``np.gradient``'s conventions.
 
     Interior points use the central three-point stencil; the two edge points use
@@ -686,8 +690,7 @@ def gpr_uncertainty(
         base * RBF(length_scale=length_scale, length_scale_bounds="fixed") + noise
     )
     u_matern = predictive_std(
-        base
-        * Matern(length_scale=length_scale, nu=1.5, length_scale_bounds="fixed")
+        base * Matern(length_scale=length_scale, nu=1.5, length_scale_bounds="fixed")
         + noise
     )
     return {"u_rbf": u_rbf, "u_matern": u_matern, "u_mean": 0.5 * (u_rbf + u_matern)}
@@ -762,9 +765,7 @@ def compute_objectives(
     coords = manifold.coords
     bounds_cfg = manifold_cfg.get("bounds", [-1.0, 1.0])
     grid_size = int(manifold_cfg.get("grid_size", 21))
-    spacing = float(
-        (float(bounds_cfg[1]) - float(bounds_cfg[0])) / (grid_size - 1)
-    )
+    spacing = float((float(bounds_cfg[1]) - float(bounds_cfg[0])) / (grid_size - 1))
 
     h_global = float(manifold_cfg.get("sph_h", 0.25))
     nearest_k = int(manifold_cfg.get("nearest_k", 8))
@@ -1055,9 +1056,7 @@ def verify_manifold(grid_npz: Path, expected_docs: int, expected_points: int) ->
         )
         ok = False
     if doc_coords.shape != (expected_docs, 2):
-        LOGGER.error(
-            "Doc coords shape %s != (%d, 2)", doc_coords.shape, expected_docs
-        )
+        LOGGER.error("Doc coords shape %s != (%d, 2)", doc_coords.shape, expected_docs)
         ok = False
     if weights.shape != (expected_points, expected_docs):
         LOGGER.error(
@@ -1158,9 +1157,7 @@ def main(argv: list[str] | None = None) -> int:
     expected_points = grid_size * grid_size
 
     if args.verify_only:
-        return (
-            0 if verify_manifold(paths.grid_npz, len(papers), expected_points) else 1
-        )
+        return 0 if verify_manifold(paths.grid_npz, len(papers), expected_points) else 1
 
     try:
         representation = load_representation(paths.tfidf_matrix, paths.tfidf_vocab)

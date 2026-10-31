@@ -26,7 +26,39 @@ checks whatever an LLM returns for that prompt).
 | 1 | Sim2Real / Domain Randomization | `abs:"domain randomization" AND abs:"sim-to-real" AND cat:cs.RO` |
 | 2 | Deep RL Control | `abs:"reinforcement learning" AND abs:"manipulation" AND cat:cs.RO` |
 
-40 papers per regime, 120 total, balanced by construction.
+35 harvested papers per regime, plus the 15 seeding papers, 120 documents total.
+
+## Seeding papers (Seed-First Expansion)
+
+The corpus does not start from a literature search. It starts from the PDFs you
+place in `docs/papers/desired/` — the papers that define what this radar is
+about. They become `doc 1` … `doc 15` with `"is_seed": true`, and they are kept
+whatever their year.
+
+Three things follow from the seeds:
+
+1. **The recency window scales with them.** Harvest starts at
+   `min(seed_year) - 2`, floored to a 10-year lookback, so adding an older seed
+   widens the window instead of leaving a temporal gap between the seeds and the
+   harvested literature.
+2. **The harvest cannot duplicate them.** Seed arXiv ids are pre-registered as
+   seen, so a seed that is itself on arXiv is never harvested twice. A seed whose
+   PDF has a free-form filename (`TD JEPA.pdf`) is resolved to its arXiv record
+   by exact title match, which supplies its year and a working link.
+3. **A rebuild starts clean.** The corpus is exactly this run's seeds plus this
+   run's harvest. Nothing is inherited from an earlier corpus.
+
+Each seed is placed in a regime by this priority:
+
+1. `corpus.seed_overrides` in `config.yaml` — `{"TD JEPA.pdf": 2}`.
+2. Otherwise, the regime whose centroid (its harvested documents plus its keyword
+   bundle) is closest in TF-IDF cosine similarity. The cosine and the margin are
+   logged for every seed, and a margin below `corpus.seed_match_margin` is
+   flagged as ambiguous so you can pin it with an override.
+
+Regime counts therefore are `35 + seeds assigned to that regime`. On the map,
+seeds are the hollow diamonds, drawn separately from the filled regime dots so
+their positions read against the gap stars.
 
 ## Quick start
 
@@ -35,8 +67,9 @@ python3 -m venv .venv
 PIP_CONFIG_FILE=/dev/null .venv/bin/pip install --isolated \
     --index-url https://pypi.org/simple -r requirements.txt
 
-.venv/bin/python -m src.harvest      # -> data/corpus.json   (120 papers)
 .venv/bin/python -m src.harvest --extract-text
+                                     # -> data/corpus.json  (120 documents:
+                                     #    15 seeding papers + 105 harvested)
                                      # -> data/corpus_fulltext.json
 .venv/bin/python -m src.embed        # -> data/sparse_tfidf.npz (120 x 250000)
 .venv/bin/python -m src.manifold     # -> data/manifold_grid.npz  (441-point grid)
@@ -294,8 +327,11 @@ tests/test_sanitize.py            bibliography and citation strippers
 tests/test_representation.py      n-gram matrix, word index, persistence
 tests/test_manifold.py            the equations that invite silent drift
 tests/test_audit.py               the eight Appendix A.2 checks
+tests/test_pareto.py              dominance orientation, archetype grouping
+tests/test_seed_first.py          seed years, harvest window, front matter
 tests/dashboard_smoke.js          offline DOM-shim test of the dashboard script
-data/corpus.json                  the 120-paper corpus (committed)
+docs/papers/desired/              the seeding PDFs (git-ignored; you supply these)
+data/corpus.json                  the 120-document corpus (committed)
 data/corpus_fulltext.json         sanitised full text (committed)
 data/sparse_tfidf.npz             Z_l2 and Z_l1 (git-ignored)
 data/tfidf_vocab.json             n-gram terms and whole-word families

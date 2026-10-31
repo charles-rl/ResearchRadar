@@ -181,10 +181,26 @@ if (!main) {
   const names = traces.map((t) => t.name);
   pass("manifold traces: " + traces.length + " -> " + names.filter(Boolean).join(", "));
 
+  /* Harvested papers sit in the three regime traces; the 15 seeding papers are
+     a fourth trace with a hollow-diamond marker so their positions read
+     separately against the gaps.  Together they must account for every paper. */
   const papers = traces.filter((t) => t.type === "scatter" && ["SysID", "Sim2Real", "RL"].includes(t.name));
-  const totalPapers = papers.reduce((s, t) => s + t.x.length, 0);
-  if (totalPapers !== 120) fail("regime traces cover " + totalPapers + " papers, expected 120");
-  else pass("3 regime traces cover all 120 papers (" + papers.map((t) => t.name + ":" + t.x.length).join(" "));
+  const seeds = traces.filter((t) => t.type === "scatter" && t.name === "Seeding papers");
+  const totalPapers = papers.reduce((s, t) => s + t.x.length, 0) +
+    seeds.reduce((s, t) => s + t.x.length, 0);
+  if (totalPapers !== 120) fail("paper traces cover " + totalPapers + " papers, expected 120");
+  else pass("3 regime traces + seed trace cover all 120 papers (" +
+    papers.map((t) => t.name + ":" + t.x.length).join(" ") + " seeds:" +
+    seeds.reduce((s, t) => s + t.x.length, 0) + ")");
+
+  if (seeds.length !== 1) fail("expected one seeding-paper trace, found " + seeds.length);
+  else if (seeds[0].marker.symbol !== "diamond-open")
+    fail("seeding papers use marker " + JSON.stringify(seeds[0].marker.symbol) + ", expected diamond-open");
+  else pass("seeding papers drawn as hollow diamonds");
+  const seededPapers = DATA.papers.filter((p) => p.is_seed);
+  if (seededPapers.length !== seeds[0].x.length)
+    fail("seed trace has " + seeds[0].x.length + " points, payload has " + seededPapers.length);
+  else pass("seed trace matches the payload's " + seededPapers.length + " seeding papers");
 
   const gaps = traces.find((t) => t.name === "Supported Knowledge Gaps");
   if (!gaps) fail("no 'Supported Knowledge Gaps' trace");
@@ -235,12 +251,11 @@ const options = documentStub.getElementById("gap-select").all().filter((n) => n.
 if (rank !== "#1") fail("drawer rank is " + JSON.stringify(rank) + ", expected #1");
 else pass("drawer shows gap #1");
 const bestGap = DATA.gaps[0];
-const expectedCoords =
-  "(" + bestGap.x.toFixed(2) + ", " + (bestGap.y >= 0 ? "+" : "-") + Math.abs(bestGap.y).toFixed(2) + ")";
-const expectedCoordsPlain = /sign/.test("nosign")
-  ? expectedCoords
-  : expectedCoords.replace("(+", "(").replace("+-", "-");
-if (coords !== expectedCoords && coords !== expectedCoordsPlain)
+/* The page renders coordinates through signed(), which prefixes an explicit
+   "+" for non-negative values so a pair always shows two signs. */
+const signed = (value) => (Number(value) >= 0 ? "+" : "") + Number(value).toFixed(2);
+const expectedCoords = "(" + signed(bestGap.x) + ", " + signed(bestGap.y) + ")";
+if (coords !== expectedCoords)
   fail("drawer coords are " + JSON.stringify(coords) + ", payload says " + expectedCoords);
 else pass("drawer coordinates match the #1 point (" + coords + ")");
 if (!promptText.includes(bestGap.filename)) fail("prompt does not name its evidence file " + bestGap.filename);
@@ -250,6 +265,21 @@ if (stats.length < 12) fail("stats grid rendered only " + stats.length + " text 
 else pass("stats grid rendered (" + stats.length + " text nodes)");
 if (anchors.length !== 5) fail("rendered " + anchors.length + " anchor links, expected 5");
 else pass("5 anchor paper links rendered");
+
+/* The regime mixture renders three Eq. 6 views per regime. A payload key change
+   once left every column blank, which looks like a styling issue and is easy to
+   miss, so the numbers themselves are asserted. */
+const mixRows = documentStub.getElementById("mixture").all().filter((n) => n.className === "mix-row");
+if (mixRows.length !== DATA.regimes.length)
+  fail("mixture rendered " + mixRows.length + " rows, expected " + DATA.regimes.length);
+else {
+  const blank = mixRows.filter((row) => {
+    const values = row.all().filter((n) => n.className === "vl" || n.className === "ad");
+    return values.length !== 3 || values.some((v) => !/^\d+\.\d{3}$/.test(String(v.textContent)));
+  });
+  if (blank.length) fail("mixture rows have missing or non-numeric values");
+  else pass("regime mixture renders 3 numeric views for all " + mixRows.length + " regimes");
+}
 if (options.length !== DATA.gaps.length)
   fail("gap dropdown has " + options.length + " options, payload has " + DATA.gaps.length);
 else pass("gap dropdown has all " + DATA.gaps.length + " gaps");

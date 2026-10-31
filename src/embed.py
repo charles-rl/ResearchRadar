@@ -109,8 +109,7 @@ class TfidfSettings:
         raw_range = tfidf_cfg.get("ngram_range", list(DEFAULT_NGRAM_RANGE))
         if not isinstance(raw_range, (list, tuple)) or len(raw_range) != 2:
             raise SystemExit(
-                "tfidf.ngram_range must be a two-element list, "
-                f"got {raw_range!r}"
+                f"tfidf.ngram_range must be a two-element list, got {raw_range!r}"
             )
         try:
             low, high = int(raw_range[0]), int(raw_range[1])
@@ -123,18 +122,14 @@ class TfidfSettings:
                 f"tfidf.ngram_range must satisfy 1 <= low <= high, got {raw_range!r}"
             )
         try:
-            max_features = int(
-                tfidf_cfg.get("max_features", DEFAULT_MAX_FEATURES)
-            )
+            max_features = int(tfidf_cfg.get("max_features", DEFAULT_MAX_FEATURES))
         except (TypeError, ValueError) as exc:
             raise SystemExit(
                 "tfidf.max_features must be an integer, "
                 f"got {tfidf_cfg.get('max_features')!r}"
             ) from exc
         if max_features < 1:
-            raise SystemExit(
-                f"tfidf.max_features must be positive, got {max_features}"
-            )
+            raise SystemExit(f"tfidf.max_features must be positive, got {max_features}")
         return cls(
             ngram_range=(low, high),
             max_features=max_features,
@@ -152,7 +147,10 @@ class TfidfSettings:
             "tf": "1 + log(tf)" if self.sublinear_tf else "tf",
             "idf": "log(1 + N/df) + 1",
             "lowercase": self.lowercase,
-            "normalisations": ["l2 (map, semantic gradient)", "l1 (feature allocation)"],
+            "normalisations": [
+                "l2 (map, semantic gradient)",
+                "l1 (feature allocation)",
+            ],
         }
 
     def fingerprint(self) -> str:
@@ -336,9 +334,30 @@ def _strip_token(token: str) -> str:
 #: and every aggregated form is still listed verbatim in ``word_forms`` so a
 #: reader can see exactly what was merged.
 _FAMILY_SUFFIXES = (
-    "ational", "ization", "isation", "ations", "ation", "izing", "ising",
-    "ities", "ity", "ives", "ements", "ement", "ings", "ing", "ies", "ied",
-    "ers", "er", "ed", "es", "ally", "al", "ly", "s",
+    "ational",
+    "ization",
+    "isation",
+    "ations",
+    "ation",
+    "izing",
+    "ising",
+    "ities",
+    "ity",
+    "ives",
+    "ements",
+    "ement",
+    "ings",
+    "ing",
+    "ies",
+    "ied",
+    "ers",
+    "er",
+    "ed",
+    "es",
+    "ally",
+    "al",
+    "ly",
+    "s",
 )
 _VOWELS = frozenset("aeiou")
 
@@ -464,12 +483,12 @@ def build_word_index(
     # n-gram presence reports 120/120 documents and Rule 2's df >= 4 / df <= 3
     # grading collapses to "everything is emergent".
     family_document_frequency = np.zeros(len(roots), dtype=np.int64)
-    root_position_by_word = {
-        word: root_position[families[word]] for word in families
-    }
+    root_position_by_word = {word: root_position[families[word]] for word in families}
     for document_counts in per_document:
         touched = {
-            root_position_by_word[word] for word in document_counts if word in root_position_by_word
+            root_position_by_word[word]
+            for word in document_counts
+            if word in root_position_by_word
         }
         for position in touched:
             family_document_frequency[position] += 1
@@ -506,9 +525,7 @@ def build_representation(
     doc_ids = [str(paper["id"]) for paper in papers]
 
     started = time.monotonic()
-    weighted, terms, document_frequency, idf = build_weighted_matrix(
-        texts, settings
-    )
+    weighted, terms, document_frequency, idf = build_weighted_matrix(texts, settings)
     LOGGER.info(
         "Vectorised %d documents into %d within-word %d-%d-grams in %.1fs",
         weighted.get_shape()[0],
@@ -518,8 +535,12 @@ def build_representation(
         time.monotonic() - started,
     )
 
-    z_l2 = cast(sp.csr_matrix, normalize(weighted, norm="l2", axis=1, copy=True)).tocsr()
-    z_l1 = cast(sp.csr_matrix, normalize(weighted, norm="l1", axis=1, copy=True)).tocsr()
+    z_l2 = cast(
+        sp.csr_matrix, normalize(weighted, norm="l2", axis=1, copy=True)
+    ).tocsr()
+    z_l1 = cast(
+        sp.csr_matrix, normalize(weighted, norm="l1", axis=1, copy=True)
+    ).tocsr()
     z_l2.sort_indices()
     z_l1.sort_indices()
 
@@ -650,8 +671,7 @@ def load_representation(matrix_path: Path, vocab_path: Path) -> Representation:
             )
     except FileNotFoundError as exc:
         raise SystemExit(
-            f"TF-IDF matrix not found: {matrix_path}\n"
-            "Run `python -m src.embed` first."
+            f"TF-IDF matrix not found: {matrix_path}\nRun `python -m src.embed` first."
         ) from exc
 
     try:
@@ -740,9 +760,7 @@ def verify_representation(
         )
         ok = False
     if expected_documents is not None and n_documents != expected_documents:
-        LOGGER.error(
-            "Expected %d documents, found %d", expected_documents, n_documents
-        )
+        LOGGER.error("Expected %d documents, found %d", expected_documents, n_documents)
         ok = False
     if n_features > representation.settings.max_features:
         LOGGER.error(
@@ -752,7 +770,11 @@ def verify_representation(
         )
         ok = False
 
-    l2_norms = np.sqrt(np.asarray(representation.z_l2.multiply(representation.z_l2).sum(axis=1)).ravel())
+    l2_norms = np.sqrt(
+        np.asarray(
+            representation.z_l2.multiply(representation.z_l2).sum(axis=1)
+        ).ravel()
+    )
     l1_sums = np.asarray(representation.z_l1.sum(axis=1)).ravel()
     l2_deviation = float(np.max(np.abs(l2_norms - 1.0)))
     l1_deviation = float(np.max(np.abs(l1_sums - 1.0)))
@@ -890,13 +912,11 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging(args.log_level)
     config = load_config(args.config)
     paths = resolve_paths(config, args.config)
-    expected = int(config.get("corpus", {}).get("target_per_regime", 40)) * 3
+    expected = int(config.get("corpus", {}).get("target_total_papers", 120))
 
     try:
         if args.verify_only:
-            representation = load_representation(
-                paths.tfidf_matrix, paths.tfidf_vocab
-            )
+            representation = load_representation(paths.tfidf_matrix, paths.tfidf_vocab)
         else:
             representation = build_and_save(config, paths, force=args.force)
     except RepresentationError as exc:

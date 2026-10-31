@@ -90,8 +90,10 @@ def test_in_text_mention_of_references_is_preserved() -> None:
 
 def test_heading_that_is_not_followed_by_a_bibliography_is_ignored() -> None:
     """A stray 'References' line before running prose must not cut the paper."""
-    text = body_with("References\nThe next section continues the analysis of the\n"
-                     "controller and its stability properties in detail.\n")
+    text = body_with(
+        "References\nThe next section continues the analysis of the\n"
+        "controller and its stability properties in detail.\n"
+    )
     body, removed, _ = strip_bibliography(text)
     assert removed == 0
     assert "continues the analysis" in body
@@ -174,7 +176,9 @@ def test_author_year_citations_removed(text: str) -> None:
 
 
 def test_citation_surname_before_a_bracket_is_removed() -> None:
-    cleaned, _ = strip_citation_callouts("As shown by Smith et al. [12] the method works.")
+    cleaned, _ = strip_citation_callouts(
+        "As shown by Smith et al. [12] the method works."
+    )
     assert "Smith" not in cleaned
     assert "the method works" in cleaned
 
@@ -394,7 +398,7 @@ def test_quality_gate_rejects_short_text() -> None:
 
 def test_quality_gate_accepts_greek_math() -> None:
     """Greek letters are letters: math-dense text is not symbol soup."""
-    text = ("the state estimate α and β parameters satisfy the bound γ " * 250)
+    text = "the state estimate α and β parameters satisfy the bound γ " * 250
     assert assess_text_quality(text).ok
 
 

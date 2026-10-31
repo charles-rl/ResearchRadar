@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+import scipy.sparse as sp
 
 from src.manifold import (
     ANCHOR_RADIUS,
@@ -153,8 +154,6 @@ def test_band_pass_white_space_never_exceeds_one() -> None:
 # Geometry
 # --------------------------------------------------------------------------- #
 def test_gram_of_unit_rows_is_cosine_similarity() -> None:
-    import scipy.sparse as sp
-
     vectors = np.array([[1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
     vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
     gram = gram_matrix(sp.csr_matrix(vectors))
@@ -242,8 +241,6 @@ def test_document_bandwidth_is_positive_even_for_coincident_points() -> None:
 # Cluster mixture
 # --------------------------------------------------------------------------- #
 def test_cluster_labels_partition_the_documents() -> None:
-    import scipy.sparse as sp
-
     rng = np.random.default_rng(3)
     dense = np.abs(rng.normal(size=(60, 40)))
     dense /= np.linalg.norm(dense, axis=1, keepdims=True)
@@ -255,8 +252,6 @@ def test_cluster_labels_partition_the_documents() -> None:
 
 
 def test_cluster_labels_reject_an_impossible_k() -> None:
-    import scipy.sparse as sp
-
     with pytest.raises(SystemExit):
         cluster_labels(sp.csr_matrix(np.ones((4, 10))), 8)
 
@@ -315,7 +310,9 @@ def test_semantic_gradient_matches_the_dense_bruteforce() -> None:
     spacing = 2.0 / (grid_size - 1)  # the grid spans [-1, 1]
 
     weights = sph_weights(grid, coords, 0.35)
-    shortcut = semantic_gradient(weights, gram_matrix(dense), grid_size, spacing)
+    shortcut = semantic_gradient(
+        weights, gram_matrix(sp.csr_matrix(dense)), grid_size, spacing
+    )
 
     # Dense path: build v(x) explicitly, then take central differences of v.
     field = weights @ dense
@@ -323,15 +320,11 @@ def test_semantic_gradient_matches_the_dense_bruteforce() -> None:
     cube = field.reshape(grid_size, grid_size, n_features)
     dv_dx = np.asarray(np.gradient(cube, spacing, axis=0)).reshape(-1, n_features)
     dv_dy = np.asarray(np.gradient(cube, spacing, axis=1)).reshape(-1, n_features)
-    expected = np.sqrt(
-        np.sum(dv_dx**2, axis=1) + np.sum(dv_dy**2, axis=1)
-    )
+    expected = np.sqrt(np.sum(dv_dx**2, axis=1) + np.sum(dv_dy**2, axis=1))
     assert np.allclose(shortcut, expected, rtol=1e-9, atol=1e-12)
 
 
 def test_semantic_gradient_is_nonzero_for_a_nonuniform_field() -> None:
-    import scipy.sparse as sp
-
     rng = np.random.default_rng(11)
     dense = np.abs(rng.normal(size=(8, 30)))
     dense /= np.linalg.norm(dense, axis=1, keepdims=True)
@@ -339,7 +332,9 @@ def test_semantic_gradient_is_nonzero_for_a_nonuniform_field() -> None:
     grid = build_grid({"manifold": {"grid_size": grid_size, "bounds": [-1.0, 1.0]}})
     coords = rng.uniform(-0.7, 0.7, size=(8, 2))
     weights = sph_weights(grid, coords, 0.3)
-    gradient = semantic_gradient(weights, gram_matrix(dense), grid_size, 0.5)
+    gradient = semantic_gradient(
+        weights, gram_matrix(sp.csr_matrix(dense)), grid_size, 0.5
+    )
     assert gradient.shape == (grid_size * grid_size,)
     assert np.all(gradient >= 0.0)
     assert gradient.max() > 0.0

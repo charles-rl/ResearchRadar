@@ -5,10 +5,45 @@
 # robotics paradigms (Obayashi et al. 2026, Knowledge Manifold Optimization).
 
 corpus:
-  # Balanced corpus: 40 papers per regime x 3 regimes = 120 total
-  target_per_regime: 40
-  total_target: 120
+  # Seed-First Expansion.  The 15 hand-picked seeding PDFs in
+  # fulltext.seeds_dir occupy doc 1..doc 15; freshly harvested papers fill
+  # doc 16..doc 120.  seeds + harvested = target_total_papers.
+  seed_dir: "docs/papers/desired"
+  seed_count: 15
+  target_total_papers: 120
+  # 120 - 15 seeds = 105 harvested, split evenly across the three regimes.
+  # The corpus is exactly balanced at 35 harvested per regime; a seed joins the
+  # regime it is assigned to, so the final per-regime count is 35 + its share
+  # of the 15 seeds.
+  target_per_regime: 35
   output_path: "data/corpus.json"
+
+  # --- Recency window (dynamic, not a rigid 3-year cutoff) -----------------
+  # Harvested papers start at (earliest seed year - seed_year_offset), clamped
+  # so the lookback never exceeds lookback_years.  This keeps the harvested
+  # literature temporally adjacent to the anchoring seeds instead of opening an
+  # artificial gap in front of an older seed (Obayashi et al. 2026, Sec. 5.1).
+  # Seeds themselves are always kept, regardless of their publication year.
+  seed_year_offset: 2
+  lookback_years: 10
+
+  # --- Seed -> regime assignment: override with fallback -------------------
+  # Priority 1: an explicit mapping in this block wins, keyed by PDF filename
+  #             (e.g. "cassie biped.pdf": 2).
+  # Priority 2: any seed not listed here is assigned automatically to the
+  #             regime whose centroid (its harvested documents plus its keyword
+  #             bundle) is closest in TF-IDF cosine similarity.  Every
+  #             assignment is logged so it can be audited or overridden.
+  # Priority 1 for the seed regime label.  Left empty on purpose: the automatic
+  # TF-IDF cosine fallback (Priority 2) is audited in the build log, and every
+  # seeding paper below is a genuine multi-regime paper that a human may want to
+  # pin differently.  Example:
+  #   seed_overrides:
+  #     "TD JEPA.pdf": 2
+  seed_overrides: {}
+  # Reviewer flag: warn when the automatic similarity margin between the best
+  # and second-best regime is below this value, i.e. the seed is ambiguous.
+  seed_match_margin: 0.02
 
   # arXiv API client paging (Phase 2)
   page_size: 100             # results per HTTP request
@@ -52,6 +87,13 @@ regimes:
       Analytical / grey-box models, least squares, Kalman filtering, state
       estimation for robotic and control systems.
     query: 'abs:"system identification" AND (cat:cs.RO OR cat:eess.SY)'
+    # Domain keywords are used ONLY to match seeds to regimes.  They never
+    # reach the arXiv query above, which stays as validated.
+    keywords:
+      - "system identification"
+      - "kalman filter"
+      - "least squares"
+      - "grey-box model"
 
   - id: 1
     name: "Domain Randomization & Sim-to-Real"
@@ -60,6 +102,10 @@ regimes:
       Stochastic physics perturbation, domain randomization, reality-gap
       transfer bounds.
     query: 'abs:"domain randomization" AND abs:"sim-to-real" AND cat:cs.RO'
+    keywords:
+      - "sim-to-real"
+      - "domain randomization"
+      - "dynamics perturbation"
 
   - id: 2
     name: "Deep Reinforcement Learning Control"
@@ -68,6 +114,10 @@ regimes:
       Policy gradient, actor-critic, PPO, stochastic policies, exploration and
       sample efficiency for robotic manipulation.
     query: 'abs:"reinforcement learning" AND abs:"manipulation" AND cat:cs.RO'
+    keywords:
+      - "reinforcement learning"
+      - "policy gradient"
+      - "robot manipulation"
 
 # Phase 1: full-text extraction (Obayashi et al. 2026, Sec. 5.2: "PDF text was
 # extracted without OCR").  The paper never relied on abstract-only text, and

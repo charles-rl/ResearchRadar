@@ -30,7 +30,15 @@ from typing import Any
 
 import numpy as np
 
-from .common import LOGGER, Paths, configure_logging, load_config, resolve_paths
+from .common import (
+    LOGGER,
+    Paths,
+    configure_logging,
+    is_seed_paper,
+    load_config,
+    paper_source_url,
+    resolve_paths,
+)
 from .report import (
     EMERGENT_DF,
     LIMITED_SOURCE_DF,
@@ -81,7 +89,8 @@ def paper_records(
                 "regime_label": str(paper["regime_label"]),
                 "x": round(float(coordinates[position, 0]), 4),
                 "y": round(float(coordinates[position, 1]), 4),
-                "url": f"https://arxiv.org/abs/{paper['id']}",
+                "url": paper_source_url(paper),
+                "is_seed": is_seed_paper(paper),
             }
         )
     return records
@@ -105,10 +114,6 @@ def field_records(
             }
         )
     return records
-
-
-def _arxiv_url(document: str) -> str:
-    return f"https://arxiv.org/abs/{document}"
 
 
 def gap_records(
@@ -144,7 +149,9 @@ def gap_records(
                 "year": int(anchor["year"]),
                 "regime": anchor["regime"],
                 "weight": float(anchor["weight"]),
-                "url": _arxiv_url(anchor["doc"]),
+                # ``source`` is already an arXiv URL, or empty for a local seed.
+                "url": str(anchor.get("source") or ""),
+                "is_seed": bool(anchor.get("is_seed", False)),
             }
             for anchor in package["contributing_documents_top5"]
         ]
@@ -198,7 +205,8 @@ def gap_records(
                                 "doc": source["doc"],
                                 "title": source["title"],
                                 "weight": float(source["weight"]),
-                                "url": _arxiv_url(source["doc"]),
+                                "url": str(source.get("source") or ""),
+                                "is_seed": bool(source.get("is_seed", False)),
                             }
                             for source in entry.get("source_docs", [])
                         ],
@@ -253,8 +261,12 @@ def build_payload(
     if not regimes:
         labels = sorted({str(paper["regime_label"]) for paper in corpus["papers"]})
         regimes = [
-            {"id": position, "label": label, "name": label,
-             "color": REGIME_COLOURS.get(label, "#94a3b8")}
+            {
+                "id": position,
+                "label": label,
+                "name": label,
+                "color": REGIME_COLOURS.get(label, "#94a3b8"),
+            }
             for position, label in enumerate(labels)
         ]
 
@@ -266,7 +278,8 @@ def build_payload(
             "non_dominated": int(metadata.get("non_dominated", 0)),
             "stress": round(archive_scalar(grid_data, "stress"), 4),
             "spearman": round(archive_scalar(grid_data, "distance_correlation"), 4),
-            "model": str(config.get("ollama", {}).get("model", "F2LLM")),
+            "representation": "char 4-7-gram TF-IDF",
+            "seeds": int(corpus["metadata"].get("n_seeds", 0)),
             "grid_size": grid_size,
             "built_from": str(PLACEHOLDER).replace(PLACEHOLDER, "src.dashboard"),
         },
@@ -304,7 +317,9 @@ def encode_payload(payload: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 # Rendering
 # --------------------------------------------------------------------------- #
-def render_dashboard(config: dict[str, Any], paths: Paths, template_path: Path) -> dict[str, Any]:
+def render_dashboard(
+    config: dict[str, Any], paths: Paths, template_path: Path
+) -> dict[str, Any]:
     """Render ``output/index.html`` and return a summary of the result."""
     if not template_path.is_file():
         raise SystemExit(f"Dashboard template not found: {template_path}")
@@ -322,9 +337,7 @@ def render_dashboard(config: dict[str, Any], paths: Paths, template_path: Path) 
     prompt_template = prompt_template_path.read_text(encoding="utf-8")
 
     corpus, grid_data, front = load_inputs(paths)
-    payload = build_payload(
-        config, corpus, grid_data, front, prompt_template, paths
-    )
+    payload = build_payload(config, corpus, grid_data, front, prompt_template, paths)
 
     document = template.replace(PLACEHOLDER, encode_payload(payload))
     paths.dashboard.parent.mkdir(parents=True, exist_ok=True)
@@ -424,7 +437,9 @@ def verify_dashboard(paths: Paths, min_bytes: int = 150_000) -> bool:
     expected_papers = len(coordinates)
     if len(payload["papers"]) != expected_papers:
         LOGGER.error(
-            "Payload has %d papers, expected %d", len(payload["papers"]), expected_papers
+            "Payload has %d papers, expected %d",
+            len(payload["papers"]),
+            expected_papers,
         )
         ok = False
     expected_gaps = len(front["solutions"])
@@ -482,18 +497,26 @@ def verify_dashboard(paths: Paths, min_bytes: int = 150_000) -> bool:
         LOGGER.error("Gap ranks are not 1..n in order: %s", ranks[:5])
         ok = False
     for gap in payload["gaps"]:
-        if not gap["prompt"] or "Appendix" not in gap["prompt"] and "Rules (binding)" not in gap["prompt"]:
+        if (
+            not gap["prompt"]
+            or "Appendix" not in gap["prompt"]
+            and "Rules (binding)" not in gap["prompt"]
+        ):
             LOGGER.error("Gap #%d has no prompt", gap["rank"])
             ok = False
             break
         if len(gap["anchors"]) != 5:
-            LOGGER.error("Gap #%d has %d anchors, expected 5", gap["rank"], len(gap["anchors"]))
+            LOGGER.error(
+                "Gap #%d has %d anchors, expected 5", gap["rank"], len(gap["anchors"])
+            )
             ok = False
         if not gap["theme_lens"]:
             LOGGER.error("Gap #%d has an empty theme lens", gap["rank"])
             ok = False
         if gap["filename"] not in gap["prompt"]:
-            LOGGER.error("Gap #%d prompt does not name %s", gap["rank"], gap["filename"])
+            LOGGER.error(
+                "Gap #%d prompt does not name %s", gap["rank"], gap["filename"]
+            )
             ok = False
         if not 0.0 <= gap["objectives"]["W"] <= 1.0:
             LOGGER.error("Gap #%d has W out of range", gap["rank"])
@@ -508,7 +531,9 @@ def verify_dashboard(paths: Paths, min_bytes: int = 150_000) -> bool:
         else:
             LOGGER.info("Dashboard #1 prompt matches %s exactly", standalone.name)
     else:
-        LOGGER.warning("Missing %s; skipped the cross-artifact prompt check", standalone)
+        LOGGER.warning(
+            "Missing %s; skipped the cross-artifact prompt check", standalone
+        )
 
     top = payload["gaps"][0]
     LOGGER.info(
@@ -554,9 +579,7 @@ def main(argv: list[str] | None = None) -> int:
     config = load_config(args.config)
     paths = resolve_paths(config, args.config)
     template_path = (
-        args.template
-        if args.template is not None
-        else paths.dashboard_template
+        args.template if args.template is not None else paths.dashboard_template
     )
     if not template_path.is_absolute() and args.template is not None:
         template_path = paths.config_dir / template_path

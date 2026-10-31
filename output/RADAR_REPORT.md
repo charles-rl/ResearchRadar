@@ -1,8 +1,8 @@
 # ResearchRadar — Supported Knowledge Gaps in Robot Learning
 
-Automated Knowledge Manifold Optimization (KMO) over a balanced 120-paper arXiv corpus spanning three conflicting robotics regimes: classical system identification, sim-to-real / domain randomization, and deep reinforcement learning control.
+Automated Knowledge Manifold Optimization (KMO) over a 120-document corpus spanning three conflicting robotics regimes: classical system identification, sim-to-real / domain randomization, and deep reinforcement learning control. The corpus is founded on user-curated seeding papers and expanded by a recency-bounded arXiv harvest.
 
-Method: Obayashi et al. (2026), *Knowledge Manifold Optimization*. Corpus `120` papers (SysID 40, Sim2Real 40, RL 40), embedded with `codefuse-ai/F2LLM-4B` (120 documents on the chart).
+Method: Obayashi et al. (2026), *Knowledge Manifold Optimization*. Corpus `120` documents (15 seeding + 105 harvested; RL 45, Sim2Real 40, SysID 35), represented as within-word character 4-7-gram TF-IDF (paper Sec. 5.2); no language model participates in any objective (120 documents on the chart).
 
 All novelty statements are **relative to this corpus** and are not claims of global scientific novelty.
 
@@ -12,160 +12,217 @@ All novelty statements are **relative to this corpus** and are not claims of glo
 | --- | --- |
 | Chart | Ω = [−1, 1]², fixed |
 | Documents | 120 |
+| Corpus composition | 15 seeding papers (`doc 1`-`doc 15`) + 105 harvested (RL 45, Sim2Real 40, SysID 35) |
+| Harvest window | arXiv `submittedDate` from 2016 (= earliest seed year minus the offset, floored by the lookback limit) |
 | Gauge-fixing anchors | 9 (8 perimeter + 1 central) |
-| Stress minimization | metric stress 610.78, Spearman(distance) 0.6039 |
+| Stress minimization | metric stress 607.16, Spearman(distance) 0.6070 |
 | Evaluation grid | 21 × 21 = 441 candidates |
 | SPH bandwidth h (global) | 0.25 |
 | Adaptive neighbourhood | 8 nearest documents |
-| White-space quantiles (this corpus) | q20 0.0511, q60 0.1663, q85 0.3105, q98 0.4294 |
+| White-space quantiles (this corpus) | q20 0.0529, q60 0.1644, q85 0.3105, q98 0.4294 |
 | White-space quantiles (paper) | q20 0.0517, q60 0.1000, q85 0.1376, q98 0.2000 |
 
 The band-pass window for `W` is recomputed on this corpus's own nearest-document distances (`use_empirical_quantiles: true`), because the paper's quantiles belong to its aerodynamic corpus at a different map scale. The paper's values are retained here as the documented reference.
 
 ## 2. Practical Pareto front
 
-Exact pairwise dominance over all 441 candidates gives **61 non-dominated** points; requiring `W(x) > 0.0` (Eq. 25) leaves the **50 practical gaps** below, ranked by Euclidean distance to the ideal corner (1, 1, 1, 1). Points on the chart's outer edge stay in the front but are interpreted cautiously (Sec. 4.5).
+Exact pairwise dominance over all 441 candidates gives **69 non-dominated** points; requiring `W(x) > 0.0` (Eq. 25) leaves the **64 practical gaps** below, ranked by Euclidean distance to the ideal corner (1, 1, 1, 1). Points on the chart's outer edge stay in the front but are interpreted cautiously (Sec. 4.5).
 
 | Rank | x | y | P_boundary | W | G | S | d_ideal | Archetype | N_eff |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | -0.20 | +0.80 | 0.951 | 1.000 | 0.797 | 0.497 | 0.5442 | Archetype A | 17.6 |
-| 2 | -0.30 | +0.80 | 0.834 | 1.000 | 0.884 | 0.462 | 0.5748 | Archetype A | 16.6 |
-| 3 | -0.10 | +0.80 | 0.948 | 0.912 | 0.709 | 0.502 | 0.5860 | Archetype A | 17.5 |
-| 4 | -0.20 | +0.70 | 0.955 | 1.000 | 0.501 | 0.605 | 0.6380 | Archetype A | 22.4 |
-| 5 | -0.40 | +0.70 | 0.693 | 0.923 | 0.745 | 0.501 | 0.6436 | Archetype A | 17.1 |
-| 6 | -0.30 | +0.70 | 0.872 | 0.785 | 0.600 | 0.559 | 0.6453 | Archetype A | 20.3 |
-| 7 | -0.20 | +0.90 | 0.871 | 1.000 | 1.000 | 0.336 | 0.6763 | Archetype A | 11.5 |
-| 8 | -0.10 | +0.70 | 0.964 | 1.000 | 0.407 | 0.655 | 0.6872 | Archetype A | 23.4 |
-| 9 | -0.40 | +0.80 | 0.644 | 1.000 | 1.000 | 0.385 | 0.7104 | Archetype A | 13.9 |
-| 10 | +0.10 | +0.80 | 0.780 | 0.912 | 0.528 | 0.508 | 0.7221 | Archetype A | 17.5 |
-| 11 | -0.50 | +0.60 | 0.513 | 0.935 | 0.710 | 0.513 | 0.7505 | Archetype A | 17.1 |
-| 12 | -0.50 | +0.70 | 0.468 | 0.932 | 0.940 | 0.404 | 0.8039 | Archetype A | 13.2 |
-| 13 | -0.20 | +0.60 | 0.948 | 0.603 | 0.348 | 0.704 | 0.8201 | Archetype A | 26.8 |
-| 14 | -0.10 | -0.70 | 0.750 | 0.832 | 0.275 | 0.711 | 0.8365 | Archetype A | 26.2 |
-| 15 | -0.60 | +0.50 | 0.341 | 0.862 | 0.630 | 0.538 | 0.8964 | Archetype A | 17.6 |
-| 16 | -0.40 | +0.50 | 0.760 | 0.386 | 0.431 | 0.711 | 0.9176 | Archetype A | 25.1 |
-| 17 | +0.40 | +0.60 | 0.704 | 1.000 | 0.183 | 0.666 | 0.9310 | Archetype A | 24.9 |
-| 18 | -0.20 | -0.70 | 0.817 | 0.407 | 0.352 | 0.670 | 0.9556 | Archetype A | 24.6 |
-| 19 | +0.50 | +0.50 | 0.634 | 1.000 | 0.170 | 0.699 | 0.9558 | Archetype A | 26.0 |
-| 20 | -0.50 | +0.50 | 0.550 | 0.416 | 0.507 | 0.643 | 0.9561 | Archetype A | 21.2 |
-| 21 | -0.40 | +0.60 | 0.732 | 0.281 | 0.557 | 0.612 | 0.9673 | Archetype A | 20.9 |
-| 22 | +0.00 | -0.70 | 0.675 | 0.633 | 0.189 | 0.719 | 0.9885 | Archetype A | 27.0 |
-| 23 | -0.10 | +0.60 | 0.960 | 0.405 | 0.249 | 0.756 | 0.9895 | Archetype A | 28.3 |
-| 24 | -0.30 | -0.30 | 0.832 | 0.337 | 0.266 | 0.943 | 1.0048 | Archetype A | 42.8 |
-| 25 | +0.70 | -0.30 | 0.833 | 1.000 | 0.063 | 0.672 | 1.0065 | Archetype B | 26.0 |
-| 26 | +0.70 | -0.20 | 0.876 | 0.930 | 0.045 | 0.717 | 1.0065 | Archetype B | 27.4 |
-| 27 | -0.60 | -0.40 | 0.466 | 0.685 | 0.284 | 0.657 | 1.0070 | Archetype A | 23.3 |
-| 28 | +0.70 | -0.10 | 0.883 | 0.781 | 0.055 | 0.733 | 1.0124 | Archetype B | 28.1 |
-| 29 | -0.30 | -0.60 | 0.838 | 0.282 | 0.333 | 0.742 | 1.0267 | Archetype A | 26.8 |
-| 30 | -0.30 | +0.10 | 0.924 | 0.257 | 0.277 | 0.977 | 1.0392 | Archetype A | 48.3 |
-| 31 | -0.60 | +0.40 | 0.364 | 0.548 | 0.413 | 0.618 | 1.0491 | Archetype A | 21.4 |
-| 32 | +0.70 | +0.00 | 0.838 | 0.615 | 0.071 | 0.731 | 1.0537 | Archetype B | 28.1 |
-| 33 | +0.30 | +0.60 | 0.782 | 0.613 | 0.088 | 0.701 | 1.0580 | Archetype A | 26.7 |
-| 34 | -0.70 | +0.40 | 0.185 | 1.000 | 0.524 | 0.520 | 1.0594 | Archetype A | 18.4 |
-| 35 | -0.30 | -0.10 | 0.842 | 0.227 | 0.271 | 0.985 | 1.0747 | Archetype A | 49.7 |
-| 36 | +0.50 | -0.50 | 0.762 | 0.620 | 0.061 | 0.731 | 1.0752 | Archetype B | 27.8 |
-| 37 | -0.30 | +0.30 | 0.917 | 0.176 | 0.295 | 0.911 | 1.0914 | Archetype A | 39.5 |
-| 38 | -0.20 | +0.40 | 0.949 | 0.215 | 0.248 | 0.881 | 1.0950 | Archetype A | 37.9 |
-| 39 | -0.20 | +0.10 | 0.977 | 0.212 | 0.232 | 0.994 | 1.1006 | Archetype A | 54.3 |
-| 40 | -0.30 | +0.50 | 0.903 | 0.132 | 0.365 | 0.760 | 1.1058 | Archetype A | 28.8 |
-| 41 | +0.40 | +0.50 | 0.743 | 0.472 | 0.071 | 0.753 | 1.1264 | Archetype A | 29.3 |
-| 42 | -0.20 | +0.30 | 0.964 | 0.131 | 0.233 | 0.953 | 1.1604 | Archetype A | 44.2 |
-| 43 | -0.10 | +0.00 | 0.952 | 0.135 | 0.154 | 1.000 | 1.2112 | Archetype A | 59.9 |
-| 44 | +0.60 | -0.30 | 0.850 | 0.331 | 0.015 | 0.784 | 1.2199 | Archetype B | 30.4 |
-| 45 | -0.10 | +0.20 | 0.967 | 0.131 | 0.143 | 0.998 | 1.2206 | Archetype A | 53.6 |
-| 46 | +0.50 | +0.40 | 0.681 | 0.338 | 0.046 | 0.767 | 1.2264 | Archetype A | 30.0 |
-| 47 | -0.90 | +0.40 | 0.000 | 0.638 | 0.952 | 0.390 | 1.2272 | Archetype A | 13.5 |
-| 48 | -0.60 | +0.60 | 0.300 | 0.177 | 0.892 | 0.427 | 1.2279 | Archetype A | 13.3 |
-| 49 | -0.20 | -0.20 | 0.831 | 0.023 | 0.222 | 1.000 | 1.2603 | Archetype A | 53.0 |
-| 50 | +0.30 | +0.20 | 0.856 | 0.168 | 0.000 | 1.000 | 1.3085 | Archetype A | 49.2 |
+| 1 | +0.40 | -0.80 | 0.892 | 1.000 | 0.829 | 0.432 | 0.6032 | Archetype A | 15.5 |
+| 2 | +0.30 | -0.80 | 0.851 | 1.000 | 0.683 | 0.501 | 0.6100 | Archetype A | 17.5 |
+| 3 | +0.40 | -0.70 | 0.930 | 1.000 | 0.595 | 0.530 | 0.6246 | Archetype B | 18.4 |
+| 4 | +0.70 | +0.50 | 0.864 | 0.947 | 0.719 | 0.443 | 0.6406 | Archetype C | 15.2 |
+| 5 | +0.50 | +0.70 | 0.744 | 0.947 | 0.754 | 0.453 | 0.6541 | Archetype D | 15.7 |
+| 6 | +0.50 | -0.70 | 0.763 | 0.947 | 0.751 | 0.437 | 0.6618 | Archetype B | 14.2 |
+| 7 | +0.40 | -0.60 | 0.944 | 0.946 | 0.455 | 0.629 | 0.6642 | Archetype B | 21.5 |
+| 8 | +0.50 | -0.60 | 0.799 | 0.950 | 0.566 | 0.535 | 0.6685 | Archetype B | 17.7 |
+| 9 | +0.60 | +0.50 | 0.849 | 0.950 | 0.512 | 0.567 | 0.6717 | Archetype C | 18.9 |
+| 10 | +0.30 | -0.70 | 0.910 | 1.000 | 0.461 | 0.602 | 0.6754 | Archetype E | 20.9 |
+| 11 | +0.40 | +0.80 | 0.691 | 1.000 | 0.724 | 0.464 | 0.6771 | Archetype D | 17.0 |
+| 12 | +0.30 | -0.90 | 0.761 | 1.000 | 1.000 | 0.366 | 0.6772 | Archetype A | 13.2 |
+| 13 | +0.80 | +0.40 | 0.750 | 1.000 | 0.707 | 0.441 | 0.6790 | Archetype C | 16.1 |
+| 14 | +0.50 | +0.80 | 0.769 | 1.000 | 1.000 | 0.354 | 0.6862 | Archetype D | 12.4 |
+| 15 | +0.50 | +0.60 | 0.744 | 0.950 | 0.530 | 0.574 | 0.6863 | Archetype D | 19.2 |
+| 16 | +0.70 | +0.40 | 0.859 | 1.000 | 0.464 | 0.538 | 0.7219 | Archetype C | 18.8 |
+| 17 | +0.80 | +0.20 | 0.654 | 1.000 | 0.563 | 0.532 | 0.7280 | Archetype F | 18.3 |
+| 18 | +0.80 | +0.10 | 0.587 | 0.927 | 0.607 | 0.544 | 0.7338 | Archetype F | 18.2 |
+| 19 | +0.20 | -0.70 | 0.846 | 1.000 | 0.380 | 0.619 | 0.7434 | Archetype E | 22.3 |
+| 20 | +0.40 | +0.70 | 0.665 | 1.000 | 0.502 | 0.556 | 0.7464 | Archetype D | 19.9 |
+| 21 | +0.40 | +0.90 | 0.733 | 0.638 | 1.000 | 0.383 | 0.7636 | Archetype D | 14.1 |
+| 22 | +0.40 | -0.90 | 0.842 | 0.638 | 1.000 | 0.334 | 0.7742 | Archetype A | 12.5 |
+| 23 | +0.90 | +0.30 | 0.518 | 1.000 | 0.997 | 0.393 | 0.7754 | Archetype F | 14.1 |
+| 24 | +0.80 | -0.10 | 0.460 | 0.927 | 0.638 | 0.545 | 0.7968 | Archetype G | 17.9 |
+| 25 | -0.20 | -0.80 | 0.553 | 1.000 | 0.507 | 0.547 | 0.8050 | Archetype H | 19.3 |
+| 26 | +0.50 | +0.50 | 0.780 | 0.696 | 0.370 | 0.663 | 0.8074 | Archetype C | 22.8 |
+| 27 | +0.60 | +0.40 | 0.873 | 0.740 | 0.333 | 0.644 | 0.8094 | Archetype C | 22.1 |
+| 28 | +0.60 | +0.80 | 0.803 | 0.941 | 1.000 | 0.213 | 0.8130 | Archetype D | 7.7 |
+| 29 | +0.40 | +0.60 | 0.676 | 0.818 | 0.362 | 0.651 | 0.8169 | Archetype D | 23.1 |
+| 30 | +0.90 | +0.20 | 0.457 | 1.000 | 0.999 | 0.384 | 0.8211 | Archetype F | 13.1 |
+| 31 | +0.50 | -0.50 | 0.846 | 0.531 | 0.436 | 0.634 | 0.8339 | Archetype B | 21.2 |
+| 32 | +0.70 | +0.00 | 0.677 | 0.924 | 0.314 | 0.660 | 0.8347 | Archetype G | 22.8 |
+| 33 | +0.70 | -0.10 | 0.628 | 1.000 | 0.336 | 0.653 | 0.8365 | Archetype G | 22.4 |
+| 34 | +0.70 | +0.10 | 0.732 | 1.000 | 0.287 | 0.654 | 0.8365 | Archetype F | 22.6 |
+| 35 | +0.30 | +0.70 | 0.630 | 1.000 | 0.334 | 0.631 | 0.8465 | Archetype I | 22.5 |
+| 36 | +0.70 | +0.20 | 0.785 | 0.869 | 0.276 | 0.630 | 0.8514 | Archetype F | 22.1 |
+| 37 | -0.10 | -0.70 | 0.662 | 1.000 | 0.288 | 0.670 | 0.8548 | Archetype H | 24.4 |
+| 38 | +0.80 | +0.00 | 0.522 | 0.602 | 0.639 | 0.530 | 0.8591 | Archetype G | 18.0 |
+| 39 | -0.30 | -0.90 | 0.402 | 1.000 | 0.865 | 0.397 | 0.8599 | Archetype H | 14.7 |
+| 40 | +0.80 | -0.20 | 0.398 | 1.000 | 0.601 | 0.516 | 0.8694 | Archetype G | 17.6 |
+| 41 | +0.30 | -0.60 | 0.946 | 0.354 | 0.361 | 0.678 | 0.9650 | Archetype E | 24.5 |
+| 42 | +0.10 | +0.70 | 0.604 | 0.818 | 0.187 | 0.679 | 0.9765 | Archetype I | 25.0 |
+| 43 | +0.30 | +0.20 | 0.882 | 0.354 | 0.248 | 0.978 | 0.9982 | Archetype J | 45.5 |
+| 44 | +0.30 | -0.20 | 0.947 | 0.285 | 0.298 | 0.960 | 1.0044 | Archetype K | 44.6 |
+| 45 | +0.60 | +0.60 | 0.833 | 0.167 | 0.758 | 0.455 | 1.0381 | Archetype C | 14.8 |
+| 46 | +0.60 | -0.10 | 0.777 | 0.387 | 0.224 | 0.744 | 1.0456 | Archetype G | 26.7 |
+| 47 | -0.70 | +0.30 | 0.614 | 0.959 | 0.074 | 0.678 | 1.0542 | Archetype L | 26.4 |
+| 48 | +0.30 | -0.30 | 0.957 | 0.200 | 0.312 | 0.906 | 1.0602 | Archetype K | 39.8 |
+| 49 | +0.70 | +0.60 | 0.850 | 0.160 | 0.972 | 0.330 | 1.0853 | Archetype C | 10.7 |
+| 50 | -0.60 | -0.40 | 0.499 | 0.837 | 0.093 | 0.695 | 1.0920 | Archetype M | 26.8 |
+| 51 | +0.20 | +0.00 | 0.888 | 0.246 | 0.218 | 1.000 | 1.0923 | Archetype J | 55.4 |
+| 52 | +0.30 | -0.50 | 0.956 | 0.160 | 0.327 | 0.766 | 1.1019 | Archetype E | 28.9 |
+| 53 | -0.70 | +0.00 | 0.688 | 0.571 | 0.061 | 0.749 | 1.1078 | Archetype N | 28.9 |
+| 54 | -0.50 | -0.50 | 0.513 | 0.563 | 0.130 | 0.715 | 1.1252 | Archetype M | 26.5 |
+| 55 | -0.20 | +0.70 | 0.462 | 0.802 | 0.079 | 0.701 | 1.1252 | Archetype O | 26.0 |
+| 56 | -0.60 | +0.40 | 0.558 | 0.670 | 0.053 | 0.711 | 1.1334 | Archetype L | 27.7 |
+| 57 | +0.40 | -0.30 | 0.981 | 0.085 | 0.336 | 0.851 | 1.1405 | Archetype K | 33.8 |
+| 58 | -0.40 | +0.60 | 0.429 | 0.881 | 0.044 | 0.703 | 1.1587 | Archetype O | 27.2 |
+| 59 | -0.10 | +0.70 | 0.533 | 0.514 | 0.109 | 0.691 | 1.1590 | Archetype O | 26.1 |
+| 60 | +0.40 | -0.50 | 0.967 | 0.053 | 0.386 | 0.728 | 1.1619 | Archetype B | 25.2 |
+| 61 | -0.30 | -0.60 | 0.624 | 0.396 | 0.113 | 0.738 | 1.1667 | Archetype H | 27.6 |
+| 62 | +0.20 | -0.10 | 0.878 | 0.121 | 0.227 | 0.986 | 1.1766 | Archetype J | 53.9 |
+| 63 | +0.30 | -0.10 | 0.939 | 0.044 | 0.278 | 0.987 | 1.1995 | Archetype J | 47.6 |
+| 64 | +0.40 | +0.10 | 0.948 | 0.010 | 0.237 | 0.925 | 1.2534 | Archetype J | 39.8 |
 
 ## 3. Discovery archetypes
 
-Per Sec. 4.7 the front is a structured set, not a ranked list: nearby points represent the same opportunity. Single-linkage grouping at radius `0.35` yields 2 archetypes.
+Per Sec. 4.7 the front is a structured set, not a ranked list: nearby points represent the same opportunity. Single-linkage grouping at radius `0.35` yields 15 archetypes.
 
 | Archetype | Points | Representative | Objectives | d_ideal |
 | --- | --- | --- | --- | --- |
-| Archetype A | 44 | (-0.20, +0.80) | P_boundary 0.95, W 1.00, G 0.80, S 0.50 | 0.5442 |
-| Archetype B | 6 | (+0.70, -0.30) | P_boundary 0.83, W 1.00, G 0.06, S 0.67 | 1.0065 |
+| Archetype A | 4 | (+0.40, -0.80) | P_boundary 0.89, W 1.00, G 0.83, S 0.43 | 0.6032 |
+| Archetype B | 6 | (+0.40, -0.70) | P_boundary 0.93, W 1.00, G 0.59, S 0.53 | 0.6246 |
+| Archetype C | 8 | (+0.70, +0.50) | P_boundary 0.86, W 0.95, G 0.72, S 0.44 | 0.6406 |
+| Archetype D | 8 | (+0.50, +0.70) | P_boundary 0.74, W 0.95, G 0.75, S 0.45 | 0.6541 |
+| Archetype E | 4 | (+0.30, -0.70) | P_boundary 0.91, W 1.00, G 0.46, S 0.60 | 0.6754 |
+| Archetype F | 6 | (+0.80, +0.20) | P_boundary 0.65, W 1.00, G 0.56, S 0.53 | 0.7280 |
+| Archetype G | 6 | (+0.80, -0.10) | P_boundary 0.46, W 0.93, G 0.64, S 0.54 | 0.7968 |
+| Archetype H | 4 | (-0.20, -0.80) | P_boundary 0.55, W 1.00, G 0.51, S 0.55 | 0.8050 |
+| Archetype I | 2 | (+0.30, +0.70) | P_boundary 0.63, W 1.00, G 0.33, S 0.63 | 0.8465 |
+| Archetype J | 5 | (+0.30, +0.20) | P_boundary 0.88, W 0.35, G 0.25, S 0.98 | 0.9982 |
+| Archetype K | 3 | (+0.30, -0.20) | P_boundary 0.95, W 0.28, G 0.30, S 0.96 | 1.0044 |
+| Archetype L | 2 | (-0.70, +0.30) | P_boundary 0.61, W 0.96, G 0.07, S 0.68 | 1.0542 |
+| Archetype M | 2 | (-0.60, -0.40) | P_boundary 0.50, W 0.84, G 0.09, S 0.69 | 1.0920 |
+| Archetype N | 1 | (-0.70, +0.00) | P_boundary 0.69, W 0.57, G 0.06, S 0.75 | 1.1078 |
+| Archetype O | 3 | (-0.20, +0.70) | P_boundary 0.46, W 0.80, G 0.08, S 0.70 | 1.1252 |
 
 ## 4. Deep dive: top 3 Pareto archetypes
 
-### Archetype A — gap #1 at (-0.20, +0.80)
+### Archetype A — gap #1 at (+0.40, -0.80)
 
-**44** points in this archetype. Objectives: **P_boundary 0.951**, **W 1.000**, **G 0.797**, **S 0.497**; distance to ideal `0.5442`.
+**4** points in this archetype. Objectives: **P_boundary 0.892**, **W 1.000**, **G 0.829**, **S 0.432**; distance to ideal `0.6032`.
 
 | Regime | K=5 global | K=8 global | K=8 adaptive |
 | --- | --- | --- | --- |
-| SysID | 0.096 | 0.266 | 0.112 |
-| Sim2Real | 0.468 | 0.125 | 0.084 |
-| RL | 0.209 | 0.000 | 0.001 |
+| SysID | 0.036 | 0.021 | 0.001 |
+| Sim2Real | 0.000 | 0.111 | 0.040 |
+| RL | 0.448 | 0.306 | 0.361 |
 
-Mixture entropy `H = 0.860`; effective contributing documents `N_eff = 17.6`; top-3 weight concentration `T3 = 0.293`; 5th-neighbour distance `d5 = 0.351`; relative uncertainty `u = 0.0032` (RBF surrogate; Matern `0.0970`).
+Mixture entropy `H = 0.711`; effective contributing documents `N_eff = 15.5`; top-3 weight concentration `T3 = 0.321`; 5th-neighbour distance `d5 = 0.406`; relative uncertainty `u = 0.0071` (RBF surrogate; Matern `0.1250`).
 
 ##### Top 5 contributing anchor papers
 
-| Document | Weight | Regime | Year | Title |
-| --- | --- | --- | --- | --- |
-| `doc 102` | 0.1153 | RL | 2023 | Gen2Sim: Scaling up Robot Learning in Simulation with Generative Models |
-| `doc 4` | 0.0993 | SysID | 2026 | BLISS: Global Blind Identification of Linear Systems with Sparse Inputs |
-| `doc 65` | 0.0789 | Sim2Real | 2022 | Photo-realistic Neural Domain Randomization |
-| `doc 74` | 0.0786 | Sim2Real | 2025 | Statistical Guarantees for Offline Domain Randomization |
-| `doc 31` | 0.0665 | SysID | 2022 | Robust Policy Learning over Multiple Uncertainty Sets |
+| Document | Weight | Regime | Year | Origin | Title |
+| --- | --- | --- | --- | --- | --- |
+| `doc 31` | 0.1230 | SysID | 2016 | harvested | The interplay between system identification and machine learning |
+| `doc 4` | 0.1108 | RL | 2025 | seed | Warm Starting of CMA-ES for Contextual Optimization Problems |
+| `doc 47` | 0.0871 | SysID | 2022 | harvested | Distributed Online System Identification for LTI Systems Using Reverse Experience Replay |
+| `doc 84` | 0.0743 | Sim2Real | 2025 | harvested | Statistical Guarantees for Offline Domain Randomization |
+| `doc 9` | 0.0650 | RL | 2025 | seed | TD-JEPA: Latent-predictive Representations for Zero-Shot Reinforcement Learning |
 
-**L2 theme lens:** `representation` (df=105), `experiments` (df=111), `reinforcement-learning` (df=3), `optimization` (df=108), `parameterized` (df=34), `generalize` (df=60), `information-theoretic` (df=4), `generalization` (df=70), `optimized` (df=73), `specific` (df=100), `parameterization` (df=13), `implementation` (df=87)
+**L2 theme lens:** `representation` (df=107), `information-theoretic` (df=4), `parameterized` (df=40), `optimization` (df=110), `parameterization` (df=14), `optimized` (df=77), `reparameterization` (df=2), `distribution` (df=90), `generalization` (df=69), `generalize` (df=64), `reparametrized` (df=3), `expectation-maximization` (df=2)
 
 **L1 concentration lens:** *(none)*
 
 Terms present in **both** lenses (strongest evidence): *(none)*
 
-### Archetype B — gap #25 at (+0.70, -0.30)
+### Archetype B — gap #3 at (+0.40, -0.70)
 
-**6** points in this archetype. Objectives: **P_boundary 0.833**, **W 1.000**, **G 0.063**, **S 0.672**; distance to ideal `1.0065`.
+**6** points in this archetype. Objectives: **P_boundary 0.930**, **W 1.000**, **G 0.595**, **S 0.530**; distance to ideal `0.6246`.
 
 | Regime | K=5 global | K=8 global | K=8 adaptive |
 | --- | --- | --- | --- |
-| SysID | 0.006 | 0.172 | 0.104 |
-| Sim2Real | 0.000 | 0.099 | 0.116 |
-| RL | 0.263 | 0.000 | 0.000 |
+| SysID | 0.034 | 0.024 | 0.003 |
+| Sim2Real | 0.000 | 0.119 | 0.051 |
+| RL | 0.440 | 0.266 | 0.313 |
 
-Mixture entropy `H = 0.672`; effective contributing documents `N_eff = 26.0`; top-3 weight concentration `T3 = 0.206`; 5th-neighbour distance `d5 = 0.265`; relative uncertainty `u = 0.0020` (RBF surrogate; Matern `0.0792`).
+Mixture entropy `H = 0.707`; effective contributing documents `N_eff = 18.4`; top-3 weight concentration `T3 = 0.278`; 5th-neighbour distance `d5 = 0.325`; relative uncertainty `u = 0.0032` (RBF surrogate; Matern `0.0934`).
 
 ##### Top 5 contributing anchor papers
 
-| Document | Weight | Regime | Year | Title |
-| --- | --- | --- | --- | --- |
-| `doc 116` | 0.0732 | RL | 2025 | SkillBlender: Towards Versatile Humanoid Whole-Body Loco-Manipulation via Skill Blending |
-| `doc 81` | 0.0695 | RL | 2025 | Accelerating Reinforcement Learning via Error-Related Human Brain Signals |
-| `doc 120` | 0.0630 | RL | 2025 | UniBYD: A Unified Framework for Learning Robotic Manipulation Across Embodiments Beyond Imitation of Human Demonstrations |
-| `doc 72` | 0.0554 | Sim2Real | 2025 | A General Peg-in-Hole Assembly Policy Based on Domain Randomized Reinforcement Learning |
-| `doc 80` | 0.0529 | Sim2Real | 2023 | Towards Transferring Tactile-based Continuous Force Control Policies from Simulation to Robot |
+| Document | Weight | Regime | Year | Origin | Title |
+| --- | --- | --- | --- | --- | --- |
+| `doc 4` | 0.0982 | RL | 2025 | seed | Warm Starting of CMA-ES for Contextual Optimization Problems |
+| `doc 31` | 0.0902 | SysID | 2016 | harvested | The interplay between system identification and machine learning |
+| `doc 47` | 0.0892 | SysID | 2022 | harvested | Distributed Online System Identification for LTI Systems Using Reverse Experience Replay |
+| `doc 84` | 0.0760 | Sim2Real | 2025 | harvested | Statistical Guarantees for Offline Domain Randomization |
+| `doc 39` | 0.0654 | SysID | 2022 | harvested | Reinforcement Learning Approach to Estimation in Linear Systems |
 
-**L2 theme lens:** `reinforcement-learning` (df=3), `representation` (df=105), `experiments` (df=111), `loco-manipulation` (df=5), `demonstration-based` (df=2), `simulation-to-reality` (df=2), `implementation` (df=87), `observation` (df=108), `generalize` (df=60), `simulation-trained` (df=3), `simulation-to-real` (df=4), `locomanipulation` (df=3)
+**L2 theme lens:** `representation` (df=107), `information-theoretic` (df=4), `parameterized` (df=40), `optimization` (df=110), `parameterization` (df=14), `optimized` (df=77), `reparameterization` (df=2), `generalize` (df=64), `generalization` (df=69), `reparametrized` (df=3), `distribution` (df=90), `overparametrization` (df=2)
 
-**L1 concentration lens:** `integrated-whole-body-rl` (df=1), `locomotion-control` (df=1), `loco-manipulation` (df=5)
+**L1 concentration lens:** *(none)*
 
-Terms present in **both** lenses (strongest evidence): `loco-manipulation`
+Terms present in **both** lenses (strongest evidence): *(none)*
+
+### Archetype C — gap #4 at (+0.70, +0.50)
+
+**8** points in this archetype. Objectives: **P_boundary 0.864**, **W 0.947**, **G 0.719**, **S 0.443**; distance to ideal `0.6406`.
+
+| Regime | K=5 global | K=8 global | K=8 adaptive |
+| --- | --- | --- | --- |
+| SysID | 0.000 | 0.000 | 0.000 |
+| Sim2Real | 0.115 | 0.035 | 0.016 |
+| RL | 0.422 | 0.001 | 0.002 |
+
+Mixture entropy `H = 0.603`; effective contributing documents `N_eff = 15.2`; top-3 weight concentration `T3 = 0.339`; 5th-neighbour distance `d5 = 0.366`; relative uncertainty `u = 0.0031` (RBF surrogate; Matern `0.0812`).
+
+##### Top 5 contributing anchor papers
+
+| Document | Weight | Regime | Year | Origin | Title |
+| --- | --- | --- | --- | --- | --- |
+| `doc 17` | 0.1460 | SysID | 2024 | harvested | Cyclic Reformulation Based System Identification for Periodically Time-varying Systems |
+| `doc 49` | 0.1018 | SysID | 2016 | harvested | Variable p norm constrained LMS algorithm based on gradient of root relative deviation.pdf |
+| `doc 43` | 0.0909 | SysID | 2016 | harvested | Modeling Parallel Wiener-Hammerstein Systems Using Tensor Decomposition of Volterra Kernels |
+| `doc 41` | 0.0749 | SysID | 2023 | harvested | A numerically efficient output-only system-identification framework for stochastically forced self-sustained oscillators |
+| `doc 36` | 0.0610 | SysID | 2019 | harvested | Identification of abrupt stiffness changes of structures with tuned mass dampers under sudden events |
+
+**L2 theme lens:** `system-identification` (df=3), `representation` (df=107), `identification` (df=59), `specific` (df=101), `parameterized` (df=40), `transformation` (df=56), `parameterization` (df=14), `quantification` (df=6), `complex` (df=104), `reparameterization` (df=2), `information-theoretic` (df=4), `robustification` (df=2)
+
+**L1 concentration lens:** `wiener-hammerstein` (df=5), `linear-nonlinear-linear` (df=1), `single-input-single-output` (df=1), `identified` (df=46), `best-identified` (df=1), `misidentified` (df=1), `block-structure` (df=1), `system-identification` (df=3), `circulant-structured` (df=1), `identifiable` (df=4), `identification` (df=59), `deep-bayesian-system-identification` (df=1)
+
+Terms present in **both** lenses (strongest evidence): `system-identification`, `identification`
 
 ## 5. Local vocabulary analysis
 
 The L2 lens marks the local research theme (direction of the l2-normalized TF-IDF field); the L1 lens marks terms whose probability mass is locally concentrated (feature allocation). Per Sec. 7.1 the two are graded differently: `df >= 4` may be read as an emergent shared topic, while `df <= 3` may only be a limited-source hypothesis that names its source documents.
 
-### 5.1 Lens table for gap #1 (-0.20, +0.80)
+### 5.1 Lens table for gap #1 (+0.40, -0.80)
 
 | Lens | Term | Score | df | Status |
 | --- | --- | --- | --- | --- |
-| L2 theme | `representation` | 0.46959 | 105 | theme |
-| L2 theme | `experiments` | 0.39513 | 111 | theme |
-| L2 theme | `reinforcement-learning` | 0.39456 | 3 | theme |
-| L2 theme | `optimization` | 0.38922 | 108 | theme |
-| L2 theme | `parameterized` | 0.37683 | 34 | theme |
-| L2 theme | `generalize` | 0.36412 | 60 | theme |
-| L2 theme | `information-theoretic` | 0.36254 | 4 | theme |
-| L2 theme | `generalization` | 0.36040 | 70 | theme |
-| L2 theme | `optimized` | 0.35918 | 73 | theme |
-| L2 theme | `specific` | 0.34426 | 100 | theme |
-| L2 theme | `parameterization` | 0.34387 | 13 | theme |
-| L2 theme | `implementation` | 0.34309 | 87 | theme |
+| L2 theme | `representation` | 0.46528 | 107 | theme |
+| L2 theme | `information-theoretic` | 0.41943 | 4 | theme |
+| L2 theme | `parameterized` | 0.40735 | 40 | theme |
+| L2 theme | `optimization` | 0.40088 | 110 | theme |
+| L2 theme | `parameterization` | 0.36093 | 14 | theme |
+| L2 theme | `optimized` | 0.35007 | 77 | theme |
+| L2 theme | `reparameterization` | 0.34377 | 2 | theme |
+| L2 theme | `distribution` | 0.34012 | 90 | theme |
+| L2 theme | `generalization` | 0.33904 | 69 | theme |
+| L2 theme | `generalize` | 0.33856 | 64 | theme |
+| L2 theme | `reparametrized` | 0.33841 | 3 | theme |
+| L2 theme | `expectation-maximization` | 0.33623 | 2 | theme |
 
 ### 5.2 Emergent shared topics (df >= 4)
 
@@ -179,8 +236,9 @@ _None at gap #1._
 
 | Archetype | Location | Emergent shared topics (df >= 4) | Limited-source terms |
 | --- | --- | --- | --- |
-| Archetype A | (-0.20, +0.80) | *(none)* | 0 |
-| Archetype B | (+0.70, -0.30) | `loco-manipulation` (df=5) | 2 |
+| Archetype A | (+0.40, -0.80) | *(none)* | 0 |
+| Archetype B | (+0.40, -0.70) | *(none)* | 0 |
+| Archetype C | (+0.70, +0.50) | `wiener-hammerstein` (df=5), `identified` (df=46), `identifiable` (df=4), `identification` (df=59) | 8 |
 
 ## 6. Distance-maximising baseline (Table 4 analogue)
 
@@ -188,21 +246,21 @@ The negative control of Obayashi et al. (2026) Sec. 8.8: pick the 16 grid points
 
 | Selection | d_nn | S | R | P_boundary | G |
 | --- | --- | --- | --- | --- | --- |
-| **Practical Pareto front (this report)** | 0.2402 | 0.6941 | 0.8624 | 0.7536 | 0.3866 |
-| Distance-maximising, all grid | 0.4402 | 0.0640 | 0.0176 | 0.0399 | 0.2363 |
-| Distance-maximising, interior only | 0.3364 | 0.2905 | 0.3026 | 0.2714 | 0.5842 |
+| **Practical Pareto front (this report)** | 0.2826 | 0.6126 | 0.7946 | 0.7363 | 0.4766 |
+| Distance-maximising, all grid | 0.4402 | 0.0620 | 0.0298 | 0.1348 | 0.2261 |
+| Distance-maximising, interior only | 0.3393 | 0.2930 | 0.3056 | 0.3926 | 0.6196 |
 
-All 16 unconstrained picks sit on the chart edge, and 0 of the 16 interior-only picks do. Restricting the search to the 361 interior points recovers support (`S` 0.064 -> 0.290) but still trails the practical front, which is the paper's point: distance alone is not a discovery criterion. Two caveats when reading this table. The distance column is the *fifth*-neighbour distance used throughout this report, not the nearest-neighbour distance of the paper's Table 4, so the absolute numbers are not comparable across the two studies. And `R` is reported as a diagnostic only: it rewards low surrogate uncertainty (Sec. 3.7), which is why it is excluded from the objectives. The front scoring high on `R` therefore says the selected locations sit in well-sampled regions of the surrogate, not that the front was optimised for it.
+All 16 unconstrained picks sit on the chart edge, and 0 of the 16 interior-only picks do. Restricting the search to the 361 interior points recovers support (`S` 0.062 -> 0.293) but still trails the practical front, which is the paper's point: distance alone is not a discovery criterion. Two caveats when reading this table. The distance column is the *fifth*-neighbour distance used throughout this report, not the nearest-neighbour distance of the paper's Table 4, so the absolute numbers are not comparable across the two studies. And `R` is reported as a diagnostic only: it rewards low surrogate uncertainty (Sec. 3.7), which is why it is excluded from the objectives. The front scoring high on `R` therefore says the selected locations sit in well-sampled regions of the surrogate, not that the front was optimised for it.
 
 ## 7. Evidence-constrained verbalization prompt
 
-The block below is the **verbatim** Appendix A.1 prompt template from Obayashi et al. (2026), with only the placeholder file name `evidence_point_<x>_<y>.json` replaced. The attached evidence package for gap #1 — chart (-0.20, +0.80) — follows the template in the same block, so the whole block can be pasted into an LLM unchanged.
+The block below is the **verbatim** Appendix A.1 prompt template from Obayashi et al. (2026), with only the placeholder file name `evidence_point_<x>_<y>.json` replaced. The attached evidence package for gap #1 — chart (+0.40, -0.80) — follows the template in the same block, so the whole block can be pasted into an LLM unchanged.
 
 ```text
 You are participating in a controlled experiment.  A deterministic 
 pipeline has analyzed a corpus of papers and exported a machine-computed 
 **evidence package** for one location on its knowledge map — the attached 
-`evidence_point_-0.20_+0.80.json`, as produced by `code/make_evidence.py`. 
+`evidence_point_+0.40_-0.80.json`, as produced by `code/make_evidence.py`. 
 No real paper occupies that location.  Your task is to write the 
 **virtual document**: a description of the research that *would* occupy 
 it. 
@@ -257,17 +315,17 @@ Deliverables
 Output Task A, then Task B, then the `Evidence used:` list.  Do not 
 include anything else — no reasoning trace, no extra sections. 
 
---- attached: evidence_point_-0.20_+0.80.json ---
+--- attached: evidence_point_+0.40_-0.80.json ---
 {
   "location": {
-    "x": -0.2,
-    "y": 0.8
+    "x": 0.4,
+    "y": -0.8
   },
   "theme_lens_L2": [
     {
       "term": "representation",
-      "weight": 0.46959,
-      "df": 105,
+      "weight": 0.46528,
+      "df": 107,
       "word_forms": [
         "represent",
         "representation",
@@ -280,32 +338,30 @@ include anything else — no reasoning trace, no extra sections.
       ]
     },
     {
-      "term": "experiments",
-      "weight": 0.39513,
-      "df": 111,
+      "term": "information-theoretic",
+      "weight": 0.41943,
+      "df": 4,
       "word_forms": [
-        "experiment",
-        "experimental",
-        "experimentally",
-        "experimentation",
-        "experimented",
-        "experimenting",
-        "experiments"
+        "information-theoretic",
+        "information-theoretical",
+        "information-theoretically"
       ]
     },
     {
-      "term": "reinforcement-learning",
-      "weight": 0.39456,
-      "df": 3,
+      "term": "parameterized",
+      "weight": 0.40735,
+      "df": 40,
       "word_forms": [
-        "reinforcement-learned",
-        "reinforcement-learning"
+        "parameterizations",
+        "parameterize",
+        "parameterized",
+        "parameterizes"
       ]
     },
     {
       "term": "optimization",
-      "weight": 0.38922,
-      "df": 108,
+      "weight": 0.40088,
+      "df": 110,
       "word_forms": [
         "optimal",
         "optimally",
@@ -316,52 +372,19 @@ include anything else — no reasoning trace, no extra sections.
       ]
     },
     {
-      "term": "parameterized",
-      "weight": 0.37683,
-      "df": 34,
+      "term": "parameterization",
+      "weight": 0.36093,
+      "df": 14,
       "word_forms": [
-        "parameterizations",
-        "parameterize",
-        "parameterized",
-        "parameterizes"
-      ]
-    },
-    {
-      "term": "generalize",
-      "weight": 0.36412,
-      "df": 60,
-      "word_forms": [
-        "generalizations",
-        "generalize",
-        "generalized",
-        "generalizes"
-      ]
-    },
-    {
-      "term": "information-theoretic",
-      "weight": 0.36254,
-      "df": 4,
-      "word_forms": [
-        "information-theoretic",
-        "information-theoretical",
-        "information-theoretically"
-      ]
-    },
-    {
-      "term": "generalization",
-      "weight": 0.3604,
-      "df": 70,
-      "word_forms": [
-        "generalisation",
-        "generality",
-        "generalization",
-        "generalizing"
+        "parameterisation",
+        "parameterization",
+        "parameterizing"
       ]
     },
     {
       "term": "optimized",
-      "weight": 0.35918,
-      "df": 73,
+      "weight": 0.35007,
+      "df": 77,
       "word_forms": [
         "optimizations",
         "optimize",
@@ -372,85 +395,108 @@ include anything else — no reasoning trace, no extra sections.
       ]
     },
     {
-      "term": "specific",
-      "weight": 0.34426,
-      "df": 100,
+      "term": "reparameterization",
+      "weight": 0.34377,
+      "df": 2,
       "word_forms": [
-        "specific",
-        "specifically",
-        "specification",
-        "specifications",
-        "specificity",
-        "specifics"
+        "reparameterization"
       ]
     },
     {
-      "term": "parameterization",
-      "weight": 0.34387,
-      "df": 13,
+      "term": "distribution",
+      "weight": 0.34012,
+      "df": 90,
       "word_forms": [
-        "parameterisation",
-        "parameterization",
-        "parameterizing"
+        "distribution",
+        "distributional",
+        "distributions"
       ]
     },
     {
-      "term": "implementation",
-      "weight": 0.34309,
-      "df": 87,
+      "term": "generalization",
+      "weight": 0.33904,
+      "df": 69,
       "word_forms": [
-        "implementation",
-        "implementations",
-        "implemented",
-        "implementing"
+        "generalisation",
+        "generality",
+        "generalization",
+        "generalizing"
+      ]
+    },
+    {
+      "term": "generalize",
+      "weight": 0.33856,
+      "df": 64,
+      "word_forms": [
+        "generalizations",
+        "generalize",
+        "generalized",
+        "generalizes"
+      ]
+    },
+    {
+      "term": "reparametrized",
+      "weight": 0.33841,
+      "df": 3,
+      "word_forms": [
+        "reparametrizations",
+        "reparametrized"
+      ]
+    },
+    {
+      "term": "expectation-maximization",
+      "weight": 0.33623,
+      "df": 2,
+      "word_forms": [
+        "expectation-maximization"
       ]
     }
   ],
   "concentration_lens_L1": [],
   "contributing_documents_top3": [
     {
-      "doc": "doc 102",
-      "arxiv": "2310.18308v1",
-      "title": "Gen2Sim: Scaling up Robot Learning in Simulation with Generative Models",
+      "doc": "doc 31",
+      "source": "https://arxiv.org/abs/1612.09158v1",
+      "is_seed": false,
+      "title": "The interplay between system identification and machine learning",
       "authors": [
-        "Pushkal Katara",
-        "Zhou Xian",
-        "Katerina Fragkiadaki"
+        "Gianluigi Pillonetto"
       ],
-      "year": 2023,
-      "regime": "RL",
-      "weight": 0.1153
+      "year": 2016,
+      "regime": "SysID",
+      "weight": 0.123
     },
     {
       "doc": "doc 4",
-      "arxiv": "2604.00520v1",
-      "title": "BLISS: Global Blind Identification of Linear Systems with Sparse Inputs",
+      "source": "https://arxiv.org/abs/2502.12555v1",
+      "is_seed": true,
+      "title": "Warm Starting of CMA-ES for Contextual Optimization Problems",
       "authors": [
-        "Kyle Poe",
-        "Uday Kiran Reddy Tadipatri",
-        "Benjamin D. Haeffele"
+        "Yuta Sekino",
+        "Kento Uchida",
+        "Shinichi Shirakawa"
       ],
-      "year": 2026,
-      "regime": "SysID",
-      "weight": 0.0993
+      "year": 2025,
+      "regime": "RL",
+      "weight": 0.1108
     },
     {
-      "doc": "doc 65",
-      "arxiv": "2210.12682v1",
-      "title": "Photo-realistic Neural Domain Randomization",
+      "doc": "doc 47",
+      "source": "https://arxiv.org/abs/2207.01062v2",
+      "is_seed": false,
+      "title": "Distributed Online System Identification for LTI Systems Using Reverse Experience Replay",
       "authors": [
-        "Sergey Zakharov",
-        "Rares Ambrus",
-        "Vitor Guizilini"
+        "Ting-Jui Chang",
+        "Shahin Shahrampour"
       ],
       "year": 2022,
-      "regime": "Sim2Real",
-      "weight": 0.0789
+      "regime": "SysID",
+      "weight": 0.0871
     }
   ],
-  "mixture_entropy_H": 0.8603,
-  "effective_contributing_documents": 17.63,
-  "relative_uncertainty_u": 0.003208
+  "mixture_entropy_H": 0.7113,
+  "effective_contributing_documents": 15.5,
+  "relative_uncertainty_u": 0.0071
 }
 ```
 

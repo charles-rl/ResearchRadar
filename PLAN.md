@@ -103,25 +103,46 @@ ResearchRadar/
 
 ### Phase 1: Corpus Acquisition and Full-Text Extraction (`src/harvest.py`)
 
-**Objective:** a balanced 120-paper robotics corpus with clean full text.
+**Objective:** a 120-paper robotics corpus with clean full text, founded on
+user-curated seeding papers (**Seed-First Expansion**).
 
-1. Query arXiv with the three regime queries in `config.yaml`, paginate, and
-   deduplicate on both arXiv id and normalised title
-   (`35` and `40` per regime after review filtering).
-2. Reject review/survey papers by title keyword and by opening-sentence pattern
+1. **Extract the seeding papers first.** Every PDF in `docs/papers/desired/` is
+   sanitised and becomes `doc 1` … `doc 15` with `"is_seed": true`. Seeds are
+   kept unconditionally, whatever their year: they define what the map is about.
+2. **Derive the recency window from the seeds.** The harvest start year is
+   `min(seed_years) - corpus.seed_year_offset` (default 2), floored at
+   `now - corpus.lookback_years` (default 10), so the window scales with the
+   seed set instead of being a fixed constant.
+3. Query arXiv with the three regime queries in `config.yaml` plus a
+   `submittedDate` clause, paginate, and deduplicate on both arXiv id and
+   normalised title, seeding the seen-id set with the seeds' own arXiv ids so no
+   seed is harvested twice (`35` harvested per regime = 105).
+4. Reject review/survey papers by title keyword and by opening-sentence pattern
    (paper §5.1 explains why review articles are excluded).
-3. Extract text: `mutool draw -F txt` for seeding PDFs in `docs/papers/desired/`,
-   the arXiv PDF for corpus papers, with an **ar5iv HTML fallback**.
-4. **Sanitise before the vocabulary exists** — this is the step that makes
+5. **Assign each seed a regime** — Priority 1 is an explicit
+   `corpus.seed_overrides` entry, Priority 2 is the closest regime by TF-IDF
+   cosine similarity against that regime's centroid (its harvested documents
+   plus its keyword bundle). Every assignment is logged with its cosine and
+   margin, and an ambiguous margin is flagged.
+6. Extract text: `mutool draw -F txt` for seeding PDFs in `docs/papers/desired/`,
+   the arXiv PDF for harvested papers, with an **ar5iv HTML fallback**.  A seed
+   saved under a free-form filename is resolved to its arXiv record by exact
+   title match, which supplies a publication year and a working link.
+7. **Sanitise before the vocabulary exists** — this is the step that makes
    Appendix A.1 Rule 4 ("none is a bibliographic fragment") true:
    * remove running headers, front matter, and the References section, with a
      body-length guard so an in-text "references" cannot truncate a paper;
    * strip bracket citations, author-year callouts, URLs, DOIs, arXiv ids;
    * verify zero bibliographic remnants survive.
-5. Quality gate: `>= 1000` words, mean word length in `[3.5, 9.0]`, and an
+8. Quality gate: `>= 1000` words, mean word length in `[3.5, 9.0]`, and an
    alphanumeric ratio of at least `0.75` **over non-whitespace characters**
    (a total-character denominator rejects equation-dense control papers).
-6. Write `data/corpus_fulltext.json`.
+9. Write **both** artifacts from the same ordered list: `data/corpus.json`
+   (metadata, no `full_text`) and `data/corpus_fulltext.json` (with `full_text`),
+   so every downstream stage reads identical, identically-ordered papers.
+
+A rebuild starts clean: the corpus contains exactly this run's seeds plus this
+run's harvest, never papers inherited from an earlier corpus.
 
 ### Phase 2: Sparse Representation (`src/embed.py`)
 

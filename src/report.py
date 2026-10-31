@@ -37,7 +37,15 @@ import numpy as np
 import scipy.sparse as sp
 from numpy.typing import NDArray
 
-from .common import LOGGER, Paths, configure_logging, load_config, resolve_paths
+from .common import (
+    LOGGER,
+    Paths,
+    configure_logging,
+    is_seed_paper,
+    load_config,
+    paper_source_url,
+    resolve_paths,
+)
 from .embed import Representation, load_representation
 
 DEFAULT_CONFIG = Path("config.yaml")
@@ -54,7 +62,182 @@ REGIME_COLOURS = {
 # filler ("drawn", "main", "illustrate") because such words have tiny global mass
 # and therefore a huge local/global enrichment ratio.
 PROSE_FILLER = frozenset(
-    ["approach", "approaches", "article", "based", "best", "better", "carried", "case", "cases", "change", "changes", "clear", "clearly", "common", "commonly", "compare", "compared", "comparing", "conclusion", "conclusions", "consider", "considered", "demonstrate", "demonstrated", "demonstrates", "describe", "described", "different", "discussion", "drawn", "during", "effective", "efficiently", "especially", "even", "example", "examples", "exhibit", "existing", "exploit", "first", "focus", "focused", "following", "found", "furthermore", "future", "general", "given", "gives", "good", "great", "high", "higher", "however", "illustrate", "illustrated", "illustrative", "important", "improve", "improved", "increasing", "introduction", "large", "larger", "latter", "lead", "leading", "less", "like", "low", "lower", "made", "main", "make", "makes", "many", "may", "method", "methods", "might", "much", "must", "new", "newly", "novel", "often", "one", "only", "operations", "operative", "others", "outperform", "outperformed", "outperforms", "paper", "papers", "particular", "particularly", "performed", "possible", "prescriptive", "present", "presented", "presents", "previous", "previously", "primary", "provide", "provides", "purpose", "rather", "recent", "recently", "recognition", "report", "reported", "results", "second", "section", "several", "show", "showed", "shown", "significant", "significantly", "similar", "simple", "simpler", "since", "small", "smaller", "study", "sudden", "suggest", "suggests", "take", "taken", "takes", "terms", "therefore", "third", "though", "three", "tools", "towards", "tutorial", "two", "typically", "understand", "understanding", "unlike", "upon", "used", "useful", "using", "various", "vast", "well", "whether", "within", "without", "work", "works", "would"]
+    [
+        "approach",
+        "approaches",
+        "article",
+        "based",
+        "best",
+        "better",
+        "carried",
+        "case",
+        "cases",
+        "change",
+        "changes",
+        "clear",
+        "clearly",
+        "common",
+        "commonly",
+        "compare",
+        "compared",
+        "comparing",
+        "conclusion",
+        "conclusions",
+        "consider",
+        "considered",
+        "compute",
+        "demonstrate",
+        "demonstrated",
+        "demonstrates",
+        "describe",
+        "described",
+        "different",
+        "discussion",
+        "drawn",
+        "during",
+        "effective",
+        "efficiently",
+        "especially",
+        "even",
+        "example",
+        "examples",
+        "exhibit",
+        "existing",
+        "experiment",
+        "experimental",
+        "experiments",
+        "exploit",
+        "first",
+        "focus",
+        "focused",
+        "following",
+        "found",
+        "furthermore",
+        "future",
+        "general",
+        "given",
+        "gives",
+        "good",
+        "great",
+        "high",
+        "higher",
+        "however",
+        "illustrate",
+        "illustrated",
+        "illustrative",
+        "implementation",
+        "implementations",
+        "important",
+        "improve",
+        "improved",
+        "increasing",
+        "initialization",
+        "initialize",
+        "initialized",
+        "introduction",
+        "large",
+        "larger",
+        "latter",
+        "lead",
+        "leading",
+        "less",
+        "like",
+        "low",
+        "lower",
+        "made",
+        "main",
+        "make",
+        "makes",
+        "many",
+        "may",
+        "method",
+        "methods",
+        "might",
+        "much",
+        "must",
+        "new",
+        "newly",
+        "novel",
+        "often",
+        "one",
+        "only",
+        "operations",
+        "operative",
+        "others",
+        "outperform",
+        "outperformed",
+        "outperforms",
+        "paper",
+        "papers",
+        "particular",
+        "particularly",
+        "performed",
+        "possible",
+        "prescriptive",
+        "present",
+        "presented",
+        "presents",
+        "previous",
+        "previously",
+        "primary",
+        "provide",
+        "provides",
+        "purpose",
+        "rather",
+        "recent",
+        "recently",
+        "recognition",
+        "report",
+        "reported",
+        "results",
+        "second",
+        "section",
+        "several",
+        "show",
+        "showed",
+        "shown",
+        "significant",
+        "significantly",
+        "similar",
+        "simple",
+        "simpler",
+        "since",
+        "small",
+        "smaller",
+        "study",
+        "sudden",
+        "suggest",
+        "suggests",
+        "take",
+        "taken",
+        "takes",
+        "terms",
+        "therefore",
+        "third",
+        "though",
+        "three",
+        "tools",
+        "towards",
+        "tutorial",
+        "two",
+        "typically",
+        "understand",
+        "understanding",
+        "unlike",
+        "upon",
+        "used",
+        "useful",
+        "using",
+        "various",
+        "vast",
+        "well",
+        "whether",
+        "within",
+        "without",
+        "work",
+        "works",
+        "would",
+    ]
 )
 
 # Word tokenizer for the two lenses. Applied through the estimator's
@@ -160,8 +343,22 @@ def _attested_forms(term: str, index: dict[str, int]) -> list[str]:
     """Collect surface variants of ``term`` that actually occur in the corpus."""
     stems = {term}
     for suffix in (
-        "ations", "ation", "ions", "ion", "ings", "ing", "ies", "ied",
-        "es", "ed", "s", "al", "ally", "ive", "ity", "ities",
+        "ations",
+        "ation",
+        "ions",
+        "ion",
+        "ings",
+        "ing",
+        "ies",
+        "ied",
+        "es",
+        "ed",
+        "s",
+        "al",
+        "ally",
+        "ive",
+        "ity",
+        "ities",
     ):
         if term.endswith(suffix) and len(term) - len(suffix) >= 3:
             stems.add(term[: -len(suffix)])
@@ -170,8 +367,21 @@ def _attested_forms(term: str, index: dict[str, int]) -> list[str]:
 
     forms: set[str] = set()
     for stem in stems:
-        for suffix in ("", "s", "es", "d", "ed", "ing", "ion", "ions",
-                       "al", "ive", "ity", "ies", "ied"):
+        for suffix in (
+            "",
+            "s",
+            "es",
+            "d",
+            "ed",
+            "ing",
+            "ion",
+            "ions",
+            "al",
+            "ive",
+            "ity",
+            "ies",
+            "ied",
+        ):
             candidate = stem + suffix
             if candidate in index:
                 forms.add(candidate)
@@ -201,7 +411,8 @@ def witness_documents(
         witnesses.append(
             {
                 "doc": doc_label(int(index)),
-                "arxiv": str(papers[int(index)]["id"]),
+                "source": paper_source_url(papers[int(index)]),
+                "is_seed": is_seed_paper(papers[int(index)]),
                 "title": str(papers[int(index)]["title"]),
                 "weight": round(float(normalized_weights[int(index)]), 4),
             }
@@ -223,9 +434,7 @@ def local_lenses(
     enrichment = local_l1 / np.maximum(vocabulary.mean_l1, 1e-12)
 
     theme_candidates = np.flatnonzero(
-        vocabulary.usable
-        & (vocabulary.document_frequency >= 2)
-        & (local_l2 > 0.0)
+        vocabulary.usable & (vocabulary.document_frequency >= 2) & (local_l2 > 0.0)
     )
     theme_order = theme_candidates[np.argsort(local_l2[theme_candidates])[::-1]]
     theme_order = theme_order[:THEME_LENS_SIZE]
@@ -278,9 +487,7 @@ def local_lenses(
         "theme_lens_L2": theme_lens,
         "concentration_lens_L1": concentration_lens,
         "shared_terms": [
-            entry["term"]
-            for entry in theme_lens
-            if entry["in_both_lenses"]
+            entry["term"] for entry in theme_lens if entry["in_both_lenses"]
         ],
         "local_l2": local_l2,
         "local_l1": local_l1,
@@ -301,7 +508,8 @@ def contributing_documents(
     return [
         {
             "doc": doc_label(int(index)),
-            "arxiv": str(papers[int(index)]["id"]),
+            "source": paper_source_url(papers[int(index)]),
+            "is_seed": is_seed_paper(papers[int(index)]),
             "title": str(papers[int(index)]["title"]),
             "authors": list(papers[int(index)]["authors"])[:3],
             "year": int(papers[int(index)]["year"]),
@@ -391,8 +599,12 @@ def prompt_evidence_package(package: dict[str, Any]) -> dict[str, Any]:
     return {
         "location": package["location"],
         "theme_lens_L2": [
-            {"term": entry["term"], "weight": entry["weight"], "df": entry["df"],
-             "word_forms": entry["word_forms"]}
+            {
+                "term": entry["term"],
+                "weight": entry["weight"],
+                "df": entry["df"],
+                "word_forms": entry["word_forms"],
+            }
             for entry in package["theme_lens_L2"]
         ],
         "concentration_lens_L1": [
@@ -411,9 +623,7 @@ def prompt_evidence_package(package: dict[str, Any]) -> dict[str, Any]:
         ],
         "contributing_documents_top3": package["contributing_documents_top3"],
         "mixture_entropy_H": package["mixture_entropy_H"],
-        "effective_contributing_documents": package[
-            "effective_contributing_documents"
-        ],
+        "effective_contributing_documents": package["effective_contributing_documents"],
         "relative_uncertainty_u": package["relative_uncertainty_u"],
     }
 
@@ -560,8 +770,12 @@ def build_figure(
             y=[top["y"]],
             mode="markers+text",
             name="#1 compromise",
-            marker={"symbol": "star", "size": 24, "color": "#ffd400",
-                    "line": {"width": 1.5, "color": "#111111"}},
+            marker={
+                "symbol": "star",
+                "size": 24,
+                "color": "#ffd400",
+                "line": {"width": 1.5, "color": "#111111"},
+            },
             text=[f"#1 ({top['x']:+.2f}, {top['y']:+.2f})"],
             textposition="top center",
             textfont={"size": 11, "color": "#111111"},
@@ -575,8 +789,13 @@ def build_figure(
             "label": "Papers + gaps",
             "method": "update",
             "args": [
-                {"visible": [False] * heatmap_count + [True] * (len(traces) - heatmap_count)},
-                {"title.text": "ResearchRadar — Knowledge Manifold and practical Pareto gaps"},
+                {
+                    "visible": [False] * heatmap_count
+                    + [True] * (len(traces) - heatmap_count)
+                },
+                {
+                    "title.text": "ResearchRadar — Knowledge Manifold and practical Pareto gaps"
+                },
             ],
         }
     ]
@@ -620,7 +839,10 @@ def build_figure(
             "scaleanchor": "x",
             "scaleratio": 1.0,
         },
-        legend={"title": {"text": "Regime / front"}, "bgcolor": "rgba(255,255,255,0.85)"},
+        legend={
+            "title": {"text": "Regime / front"},
+            "bgcolor": "rgba(255,255,255,0.85)",
+        },
         hovermode="closest",
         updatemenus=[
             {
@@ -657,9 +879,7 @@ def _escape(text: str) -> str:
     return text.replace("|", "\\|").replace("\n", " ")
 
 
-def archive_scalar(
-    grid_data: dict[str, Any], key: str, default: float = 0.0
-) -> float:
+def archive_scalar(grid_data: dict[str, Any], key: str, default: float = 0.0) -> float:
     """Read a single saved scalar from the grid archive.
 
     Scalars are stored as length-1 arrays by ``np.savez``, so they must be
@@ -698,9 +918,7 @@ def render_markdown(
         key: float(value)
         for key, value in zip(
             ("q20", "q60", "q85", "q98"),
-            np.asarray(
-                grid_data.get("whitespace_quantiles", np.zeros(4))
-            ).ravel(),
+            np.asarray(grid_data.get("whitespace_quantiles", np.zeros(4))).ravel(),
             strict=False,
         )
     }
@@ -709,21 +927,27 @@ def render_markdown(
     lines.append("# ResearchRadar — Supported Knowledge Gaps in Robot Learning")
     lines.append("")
     lines.append(
-        "Automated Knowledge Manifold Optimization (KMO) over a balanced 120-paper "
-        "arXiv corpus spanning three conflicting robotics regimes: classical system "
+        "Automated Knowledge Manifold Optimization (KMO) over a 120-document "
+        "corpus spanning three conflicting robotics regimes: classical system "
         "identification, sim-to-real / domain randomization, and deep reinforcement "
-        "learning control."
+        "learning control. The corpus is founded on user-curated seeding papers "
+        "and expanded by a recency-bounded arXiv harvest."
     )
     lines.append("")
     lines.append(
         f"Method: Obayashi et al. (2026), *Knowledge Manifold Optimization*. "
-        f"Corpus `{corpus['metadata']['total_papers']}` papers "
-        f"({', '.join(f'{k} {v}' for k, v in corpus['metadata']['regime_counts'].items())}), "
-        f"embedded with `{config.get('ollama', {}).get('model', 'F2LLM')}` "
+        f"Corpus `{corpus['metadata']['n_papers']}` documents "
+        f"({corpus['metadata']['n_seeds']} seeding + "
+        f"{corpus['metadata']['n_harvested']} harvested; "
+        f"{', '.join(f'{key} {value}' for key, value in corpus['metadata']['regime_counts'].items())}), "
+        f"represented as within-word character 4-7-gram TF-IDF (paper Sec. 5.2); "
+        f"no language model participates in any objective "
         f"({int(np.asarray(grid_data['doc_coords']).shape[0])} documents on the chart)."
     )
     lines.append("")
-    lines.append("All novelty statements are **relative to this corpus** and are not claims of global scientific novelty.")
+    lines.append(
+        "All novelty statements are **relative to this corpus** and are not claims of global scientific novelty."
+    )
     lines.append("")
 
     # --- manifold summary ------------------------------------------------
@@ -735,15 +959,48 @@ def render_markdown(
             [
                 ["Chart", "Ω = [−1, 1]², fixed"],
                 ["Documents", str(len(papers))],
+                [
+                    "Corpus composition",
+                    (
+                        f"{corpus['metadata']['n_seeds']} seeding papers "
+                        f"(`doc 1`-`doc {corpus['metadata']['n_seeds']}`) + "
+                        f"{corpus['metadata']['n_harvested']} harvested ("
+                        + ", ".join(
+                            f"{key} {value}"
+                            for key, value in corpus["metadata"][
+                                "regime_counts"
+                            ].items()
+                        )
+                        + ")"
+                    ),
+                ],
+                [
+                    "Harvest window",
+                    (
+                        "arXiv `submittedDate` from "
+                        f"{corpus['metadata']['harvest_start_year']} "
+                        "(= earliest seed year minus the offset, floored by the "
+                        "lookback limit)"
+                    ),
+                ],
                 ["Gauge-fixing anchors", "9 (8 perimeter + 1 central)"],
                 [
                     "Stress minimization",
                     f"metric stress {archive_scalar(grid_data, 'stress'):.2f}, "
                     + f"Spearman(distance) {archive_scalar(grid_data, 'distance_correlation'):.4f}",
                 ],
-                ["Evaluation grid", f"{grid_size} × {grid_size} = {metadata['candidates']} candidates"],
-                ["SPH bandwidth h (global)", f"{archive_scalar(grid_data, 'sph_h', 0.25):.2f}"],
-                ["Adaptive neighbourhood", f"{int(archive_scalar(grid_data, 'nearest_k', 8))} nearest documents"],
+                [
+                    "Evaluation grid",
+                    f"{grid_size} × {grid_size} = {metadata['candidates']} candidates",
+                ],
+                [
+                    "SPH bandwidth h (global)",
+                    f"{archive_scalar(grid_data, 'sph_h', 0.25):.2f}",
+                ],
+                [
+                    "Adaptive neighbourhood",
+                    f"{int(archive_scalar(grid_data, 'nearest_k', 8))} nearest documents",
+                ],
                 [
                     "White-space quantiles (this corpus)",
                     ", ".join(
@@ -754,7 +1011,9 @@ def render_markdown(
                     "White-space quantiles (paper)",
                     ", ".join(
                         f"{key} {float(value):.4f}"
-                        for key, value in (manifold_cfg.get("q_whitespace", {}) or {}).items()
+                        for key, value in (
+                            manifold_cfg.get("q_whitespace", {}) or {}
+                        ).items()
                     ),
                 ],
             ],
@@ -782,7 +1041,18 @@ def render_markdown(
     )
     lines.append("")
 
-    headers = ["Rank", "x", "y", "P_boundary", "W", "G", "S", "d_ideal", "Archetype", "N_eff"]
+    headers = [
+        "Rank",
+        "x",
+        "y",
+        "P_boundary",
+        "W",
+        "G",
+        "S",
+        "d_ideal",
+        "Archetype",
+        "N_eff",
+    ]
     rows: list[list[str]] = []
     for solution in solutions:
         scores = solution["objectives"]
@@ -823,7 +1093,9 @@ def render_markdown(
                     f"({archetype['representative']['x']:+.2f}, {archetype['representative']['y']:+.2f})",
                     ", ".join(
                         f"{name} {value:.2f}"
-                        for name, value in archetype["representative"]["objectives"].items()
+                        for name, value in archetype["representative"][
+                            "objectives"
+                        ].items()
                     ),
                     f"{archetype['representative']['ideal_distance']:.4f}",
                 ]
@@ -887,13 +1159,14 @@ def render_markdown(
         lines.append("")
         lines.append(
             _markdown_table(
-                ["Document", "Weight", "Regime", "Year", "Title"],
+                ["Document", "Weight", "Regime", "Year", "Origin", "Title"],
                 [
                     [
                         f"`{anchor['doc']}`",
                         f"{anchor['weight']:.4f}",
                         anchor["regime"],
                         str(anchor["year"]),
+                        "seed" if anchor.get("is_seed") else "harvested",
                         _escape(anchor["title"]),
                     ]
                     for anchor in package["contributing_documents_top5"]
@@ -964,10 +1237,13 @@ def render_markdown(
     lines.append("")
 
     emergent = [
-        entry for entry in primary["concentration_lens_L1"] if entry["df"] >= EMERGENT_DF
+        entry
+        for entry in primary["concentration_lens_L1"]
+        if entry["df"] >= EMERGENT_DF
     ]
     limited = [
-        entry for entry in primary["concentration_lens_L1"]
+        entry
+        for entry in primary["concentration_lens_L1"]
         if entry["df"] <= LIMITED_SOURCE_DF
     ]
 
@@ -990,9 +1266,7 @@ def render_markdown(
             )
         )
     else:
-        lines.append(
-            "_No L1 concentration term reaches this df at gap #1._"
-        )
+        lines.append("_No L1 concentration term reaches this df at gap #1._")
     lines.append("")
 
     lines.append(f"### 5.3 Limited-source hypotheses (df <= {LIMITED_SOURCE_DF})")
@@ -1007,7 +1281,9 @@ def render_markdown(
                         str(entry["df"]),
                         f"x{entry['enrichment']:.2f}",
                         "; ".join(
-                            f"`{source['doc']}` (w={source['weight']:.3f})"
+                            f"`{source['doc']}`"
+                            f"{' [seed]' if source.get('is_seed') else ''} "
+                            f"(w={source['weight']:.3f})"
                             for source in entry.get("source_docs", [])
                         )
                         or "*(not attested in a contributing document)*",
@@ -1043,8 +1319,7 @@ def render_markdown(
                 str(archetype["label"]),
                 f"({representative['x']:+.2f}, {representative['y']:+.2f})",
                 ", ".join(
-                    f"`{entry['term']}` (df={entry['df']})"
-                    for entry in cross_emergent
+                    f"`{entry['term']}` (df={entry['df']})" for entry in cross_emergent
                 )
                 or "*(none)*",
                 str(
@@ -1058,15 +1333,19 @@ def render_markdown(
         )
     lines.append(
         _markdown_table(
-            ["Archetype", "Location", "Emergent shared topics (df >= 4)",
-             "Limited-source terms"],
+            [
+                "Archetype",
+                "Location",
+                "Emergent shared topics (df >= 4)",
+                "Limited-source terms",
+            ],
             cross_rows,
         )
     )
     lines.append("")
 
     # --- Table 4 baseline -------------------------------------------------
-    baseline = (config.get("_baseline") or {})
+    baseline = config.get("_baseline") or {}
     if baseline:
         lines.append("## 6. Distance-maximising baseline (Table 4 analogue)")
         lines.append("")
@@ -1088,16 +1367,41 @@ def render_markdown(
             [int(solution["grid_index"]) for solution in solutions], dtype=np.int64
         )
         front_means = {
-            "d_nn": float(np.mean([float(package["fifth_neighbour_distance_d5"]) for package in packages.values()])),
-            "S": float(np.mean([float(package["objectives"]["S"]) for package in packages.values()])),
+            "d_nn": float(
+                np.mean(
+                    [
+                        float(package["fifth_neighbour_distance_d5"])
+                        for package in packages.values()
+                    ]
+                )
+            ),
+            "S": float(
+                np.mean(
+                    [float(package["objectives"]["S"]) for package in packages.values()]
+                )
+            ),
             "R": float(reliability[front_indices].mean()),
-            "P_boundary": float(np.mean([float(package["objectives"]["P_boundary"]) for package in packages.values()])),
-            "G": float(np.mean([float(package["objectives"]["G"]) for package in packages.values()])),
+            "P_boundary": float(
+                np.mean(
+                    [
+                        float(package["objectives"]["P_boundary"])
+                        for package in packages.values()
+                    ]
+                )
+            ),
+            "G": float(
+                np.mean(
+                    [float(package["objectives"]["G"]) for package in packages.values()]
+                )
+            ),
         }
         rows = [
             [
                 "**Practical Pareto front (this report)**",
-                *[f"{front_means[key]:.4f}" for key in ("d_nn", "S", "R", "P_boundary", "G")],
+                *[
+                    f"{front_means[key]:.4f}"
+                    for key in ("d_nn", "S", "R", "P_boundary", "G")
+                ],
             ]
         ]
         for label, key in (
@@ -1297,8 +1601,7 @@ def build_gap_packages(
     representation = load_representation(paths.tfidf_matrix, paths.tfidf_vocab)
     if representation.doc_ids != [str(paper["id"]) for paper in papers]:
         raise SystemExit(
-            "TF-IDF row order does not match the corpus; re-run "
-            "`python -m src.embed`"
+            "TF-IDF row order does not match the corpus; re-run `python -m src.embed`"
         )
     vocabulary = build_vocabulary(representation)
     # Archetype labels, N_eff, and top-3 anchors are derived per solution and are
@@ -1337,9 +1640,7 @@ def write_outputs(
         )
     template = template_path.read_text(encoding="utf-8")
 
-    vocabulary, packages = build_gap_packages(
-        corpus, grid_data, front, config, paths
-    )
+    vocabulary, packages = build_gap_packages(corpus, grid_data, front, config, paths)
 
     primary = front["solutions"][0]
     primary_package = packages[int(primary["grid_index"])]
@@ -1443,16 +1744,13 @@ def verify_outputs(
 
     if missing:
         LOGGER.error(
-            "Report deviates from the Appendix A.1 template in %d line(s); "
-            "first: %r",
+            "Report deviates from the Appendix A.1 template in %d line(s); first: %r",
             len(missing),
             missing[0],
         )
         ok = False
     else:
-        LOGGER.info(
-            "Appendix A.1 template present (%d lines)", len(template_lines)
-        )
+        LOGGER.info("Appendix A.1 template present (%d lines)", len(template_lines))
 
     # The template is the paper's text with exactly one documented change: Rule 3
     # names the paper's own domain ("composites"), and this corpus is robotics.
@@ -1505,9 +1803,7 @@ def verify_outputs(
             LOGGER.error("Evidence package missing field: %s", field)
             ok = False
 
-    table_rows = [
-        line for line in markdown.splitlines() if line.startswith("| ")
-    ]
+    table_rows = [line for line in markdown.splitlines() if line.startswith("| ")]
     if len(table_rows) < 20:
         LOGGER.error("Report tables look under-populated: %d rows", len(table_rows))
         ok = False
@@ -1531,7 +1827,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument(
-        "--template", type=Path, default=PROMPT_TEMPLATE,
+        "--template",
+        type=Path,
+        default=PROMPT_TEMPLATE,
         help="Verbatim Appendix A.1 prompt template",
     )
     parser.add_argument(

@@ -1,7 +1,7 @@
 You are participating in a controlled experiment.  A deterministic 
 pipeline has analyzed a corpus of papers and exported a machine-computed 
 **evidence package** for one location on its knowledge map — the attached 
-`evidence_point_-0.20_+0.80.json`, as produced by `code/make_evidence.py`. 
+`evidence_point_+0.40_-0.80.json`, as produced by `code/make_evidence.py`. 
 No real paper occupies that location.  Your task is to write the 
 **virtual document**: a description of the research that *would* occupy 
 it. 
@@ -56,17 +56,17 @@ Deliverables
 Output Task A, then Task B, then the `Evidence used:` list.  Do not 
 include anything else — no reasoning trace, no extra sections. 
 
---- attached: evidence_point_-0.20_+0.80.json ---
+--- attached: evidence_point_+0.40_-0.80.json ---
 {
   "location": {
-    "x": -0.2,
-    "y": 0.8
+    "x": 0.4,
+    "y": -0.8
   },
   "theme_lens_L2": [
     {
       "term": "representation",
-      "weight": 0.46959,
-      "df": 105,
+      "weight": 0.46528,
+      "df": 107,
       "word_forms": [
         "represent",
         "representation",
@@ -79,32 +79,30 @@ include anything else — no reasoning trace, no extra sections.
       ]
     },
     {
-      "term": "experiments",
-      "weight": 0.39513,
-      "df": 111,
+      "term": "information-theoretic",
+      "weight": 0.41943,
+      "df": 4,
       "word_forms": [
-        "experiment",
-        "experimental",
-        "experimentally",
-        "experimentation",
-        "experimented",
-        "experimenting",
-        "experiments"
+        "information-theoretic",
+        "information-theoretical",
+        "information-theoretically"
       ]
     },
     {
-      "term": "reinforcement-learning",
-      "weight": 0.39456,
-      "df": 3,
+      "term": "parameterized",
+      "weight": 0.40735,
+      "df": 40,
       "word_forms": [
-        "reinforcement-learned",
-        "reinforcement-learning"
+        "parameterizations",
+        "parameterize",
+        "parameterized",
+        "parameterizes"
       ]
     },
     {
       "term": "optimization",
-      "weight": 0.38922,
-      "df": 108,
+      "weight": 0.40088,
+      "df": 110,
       "word_forms": [
         "optimal",
         "optimally",
@@ -115,52 +113,19 @@ include anything else — no reasoning trace, no extra sections.
       ]
     },
     {
-      "term": "parameterized",
-      "weight": 0.37683,
-      "df": 34,
+      "term": "parameterization",
+      "weight": 0.36093,
+      "df": 14,
       "word_forms": [
-        "parameterizations",
-        "parameterize",
-        "parameterized",
-        "parameterizes"
-      ]
-    },
-    {
-      "term": "generalize",
-      "weight": 0.36412,
-      "df": 60,
-      "word_forms": [
-        "generalizations",
-        "generalize",
-        "generalized",
-        "generalizes"
-      ]
-    },
-    {
-      "term": "information-theoretic",
-      "weight": 0.36254,
-      "df": 4,
-      "word_forms": [
-        "information-theoretic",
-        "information-theoretical",
-        "information-theoretically"
-      ]
-    },
-    {
-      "term": "generalization",
-      "weight": 0.3604,
-      "df": 70,
-      "word_forms": [
-        "generalisation",
-        "generality",
-        "generalization",
-        "generalizing"
+        "parameterisation",
+        "parameterization",
+        "parameterizing"
       ]
     },
     {
       "term": "optimized",
-      "weight": 0.35918,
-      "df": 73,
+      "weight": 0.35007,
+      "df": 77,
       "word_forms": [
         "optimizations",
         "optimize",
@@ -171,83 +136,106 @@ include anything else — no reasoning trace, no extra sections.
       ]
     },
     {
-      "term": "specific",
-      "weight": 0.34426,
-      "df": 100,
+      "term": "reparameterization",
+      "weight": 0.34377,
+      "df": 2,
       "word_forms": [
-        "specific",
-        "specifically",
-        "specification",
-        "specifications",
-        "specificity",
-        "specifics"
+        "reparameterization"
       ]
     },
     {
-      "term": "parameterization",
-      "weight": 0.34387,
-      "df": 13,
+      "term": "distribution",
+      "weight": 0.34012,
+      "df": 90,
       "word_forms": [
-        "parameterisation",
-        "parameterization",
-        "parameterizing"
+        "distribution",
+        "distributional",
+        "distributions"
       ]
     },
     {
-      "term": "implementation",
-      "weight": 0.34309,
-      "df": 87,
+      "term": "generalization",
+      "weight": 0.33904,
+      "df": 69,
       "word_forms": [
-        "implementation",
-        "implementations",
-        "implemented",
-        "implementing"
+        "generalisation",
+        "generality",
+        "generalization",
+        "generalizing"
+      ]
+    },
+    {
+      "term": "generalize",
+      "weight": 0.33856,
+      "df": 64,
+      "word_forms": [
+        "generalizations",
+        "generalize",
+        "generalized",
+        "generalizes"
+      ]
+    },
+    {
+      "term": "reparametrized",
+      "weight": 0.33841,
+      "df": 3,
+      "word_forms": [
+        "reparametrizations",
+        "reparametrized"
+      ]
+    },
+    {
+      "term": "expectation-maximization",
+      "weight": 0.33623,
+      "df": 2,
+      "word_forms": [
+        "expectation-maximization"
       ]
     }
   ],
   "concentration_lens_L1": [],
   "contributing_documents_top3": [
     {
-      "doc": "doc 102",
-      "arxiv": "2310.18308v1",
-      "title": "Gen2Sim: Scaling up Robot Learning in Simulation with Generative Models",
+      "doc": "doc 31",
+      "source": "https://arxiv.org/abs/1612.09158v1",
+      "is_seed": false,
+      "title": "The interplay between system identification and machine learning",
       "authors": [
-        "Pushkal Katara",
-        "Zhou Xian",
-        "Katerina Fragkiadaki"
+        "Gianluigi Pillonetto"
       ],
-      "year": 2023,
-      "regime": "RL",
-      "weight": 0.1153
+      "year": 2016,
+      "regime": "SysID",
+      "weight": 0.123
     },
     {
       "doc": "doc 4",
-      "arxiv": "2604.00520v1",
-      "title": "BLISS: Global Blind Identification of Linear Systems with Sparse Inputs",
+      "source": "https://arxiv.org/abs/2502.12555v1",
+      "is_seed": true,
+      "title": "Warm Starting of CMA-ES for Contextual Optimization Problems",
       "authors": [
-        "Kyle Poe",
-        "Uday Kiran Reddy Tadipatri",
-        "Benjamin D. Haeffele"
+        "Yuta Sekino",
+        "Kento Uchida",
+        "Shinichi Shirakawa"
       ],
-      "year": 2026,
-      "regime": "SysID",
-      "weight": 0.0993
+      "year": 2025,
+      "regime": "RL",
+      "weight": 0.1108
     },
     {
-      "doc": "doc 65",
-      "arxiv": "2210.12682v1",
-      "title": "Photo-realistic Neural Domain Randomization",
+      "doc": "doc 47",
+      "source": "https://arxiv.org/abs/2207.01062v2",
+      "is_seed": false,
+      "title": "Distributed Online System Identification for LTI Systems Using Reverse Experience Replay",
       "authors": [
-        "Sergey Zakharov",
-        "Rares Ambrus",
-        "Vitor Guizilini"
+        "Ting-Jui Chang",
+        "Shahin Shahrampour"
       ],
       "year": 2022,
-      "regime": "Sim2Real",
-      "weight": 0.0789
+      "regime": "SysID",
+      "weight": 0.0871
     }
   ],
-  "mixture_entropy_H": 0.8603,
-  "effective_contributing_documents": 17.63,
-  "relative_uncertainty_u": 0.003208
+  "mixture_entropy_H": 0.7113,
+  "effective_contributing_documents": 15.5,
+  "relative_uncertainty_u": 0.0071
 }

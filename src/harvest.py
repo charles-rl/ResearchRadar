@@ -10,14 +10,20 @@ Implements Phase 2 of ``PLAN.md``:
   distort local semantic density and kernel interpolation.
 * Abstracts are sanitized (LaTeX math stripped, whitespace normalized) so the
   downstream TF-IDF / embedding pipeline sees clean prose.
-* Results are deduplicated across arXiv IDs *and* normalized titles, then
-  written as a balanced corpus (40 papers per regime, 120 total) to
-  ``data/corpus.json``.
+* Results are deduplicated across arXiv IDs *and* normalized titles.
+* Seed-First Expansion: the hand-picked PDFs in ``fulltext.seeds_dir`` occupy
+  ``doc 1``..``doc 15`` of the corpus and the harvested papers fill the rest, so
+  seeding papers and harvest share one representation (see
+  ``build_fulltext_corpus``).
+
+The corpus is written to ``data/corpus.json`` (metadata) and
+``data/corpus_fulltext.json`` (sanitised full text for every document).
 
 Usage
 -----
-    python -m src.harvest
-    python -m src.harvest --config config.yaml --out data/corpus.json
+    python -m src.harvest                      # harvest metadata only
+    python -m src.harvest --extract-text       # full Seed-First rebuild
+    python -m src.harvest --verify-fulltext
 """
 
 from __future__ import annotations
@@ -30,15 +36,19 @@ import subprocess
 import sys
 import time
 import unicodedata
+from collections import Counter
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import arxiv
+import numpy as np
 import requests
 import yaml
 from lxml import html as lxml_html
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 LOGGER = logging.getLogger("research_radar.harvest")
 
@@ -276,8 +286,7 @@ def paged_results(
                 return
             backoff = delay_seconds * (2**attempts)
             LOGGER.warning(
-                "arXiv paging error (%s: %s); retry %d/%d in %.1fs "
-                "(resuming at #%d)",
+                "arXiv paging error (%s: %s); retry %d/%d in %.1fs (resuming at #%d)",
                 type(exc).__name__,
                 exc,
                 attempts,
@@ -300,12 +309,14 @@ def harvest_regime_papers(
     min_abstract_words: int = 40,
     delay_seconds: float = 3.0,
     num_retries: int = 5,
+    date_range: str = "",
 ) -> list[dict[str, Any]]:
     """Harvest up to ``target_count`` papers for a single regime.
 
     Papers already present in ``seen_ids`` / ``seen_titles`` are skipped so the
-    regimes stay disjoint; new IDs and titles are registered as records are
-    accepted.
+    regimes stay disjoint and no seeding paper is fetched twice; new IDs and
+    titles are registered as records are accepted.  ``date_range`` is an optional
+    arXiv ``submittedDate`` clause ANDed onto the regime query.
     """
     collected: list[dict[str, Any]] = []
     scanned = 0
@@ -313,8 +324,13 @@ def harvest_regime_papers(
     rejected_short = 0
     rejected_dupe = 0
 
+    base_query = str(regime_cfg["query"])
+    query = f"({base_query}) AND {date_range}" if date_range else base_query
+    if date_range:
+        LOGGER.info("[%s] query with recency window: %s", regime_cfg["label"], query)
+
     search = arxiv.Search(
-        query=regime_cfg["query"],
+        query=query,
         max_results=max_query_results,
         sort_by=arxiv.SortCriterion.Relevance,
     )
@@ -354,6 +370,7 @@ def harvest_regime_papers(
             "year": published.year,
             "regime_id": int(regime_cfg["id"]),
             "regime_label": regime_cfg["label"],
+            "is_seed": False,
             # --- provenance (not required by the schema, kept for auditability)
             "regime_name": regime_cfg["name"],
             "entry_id": result.entry_id,
@@ -363,7 +380,7 @@ def harvest_regime_papers(
             "categories": list(result.categories),
             "doi": result.doi,
             "journal_ref": result.journal_ref,
-            "query": regime_cfg["query"],
+            "query": query,
         }
 
         collected.append(record)
@@ -401,26 +418,70 @@ def harvest_regime_papers(
     return collected
 
 
-def harvest_all(config: dict[str, Any]) -> dict[str, Any]:
-    """Run the full three-regime harvest and return the corpus document."""
+def _config_int(block: dict[str, Any], key: str, default: int) -> int:
+    """Read an integer from a config block, failing loudly and naming the key.
+
+    A silently coerced value would change the corpus size or the recency window
+    without anyone noticing, so a bad value aborts the run instead.
+    """
+    value = block.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        try:
+            return int(str(value))
+        except (TypeError, ValueError) as exc:
+            raise SystemExit(f"{key} must be an integer, got {value!r}") from exc
+    return value
+
+
+def _config_float(block: dict[str, Any], key: str, default: float) -> float:
+    """Read a float from a config block, failing loudly and naming the key."""
+    value = block.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        try:
+            return float(str(value))
+        except (TypeError, ValueError) as exc:
+            raise SystemExit(f"{key} must be a number, got {value!r}") from exc
+    return float(value)
+
+
+def harvest_all(
+    config: dict[str, Any],
+    start_year: int | None = None,
+    seed_identifiers: Iterable[str] = (),
+) -> dict[str, Any]:
+    """Run the full three-regime harvest and return the corpus document.
+
+    ``start_year`` applies the dynamic recency window as an arXiv
+    ``submittedDate`` clause.  ``seed_identifiers`` pre-registers seeding papers
+    so a seed that is itself on arXiv is never fetched a second time.
+    """
     corpus_cfg = config.get("corpus", {})
     regimes: list[dict[str, Any]] = config.get("regimes", [])
     if not regimes:
         raise ValueError("config.yaml defines no regimes")
 
-    target_per_regime = int(corpus_cfg.get("target_per_regime", 40))
-    max_query_results = int(corpus_cfg.get("max_query_results", 400))
+    target_per_regime = _config_int(corpus_cfg, "target_per_regime", 35)
+    max_query_results = _config_int(corpus_cfg, "max_query_results", 400)
     exclude_keywords = [str(k) for k in corpus_cfg.get("exclude_review_keywords", [])]
     abstract_patterns = [
         str(p) for p in corpus_cfg.get("exclude_review_abstract_patterns", [])
     ]
-    min_abstract_words = int(corpus_cfg.get("min_abstract_words", 40))
-    delay_seconds = float(corpus_cfg.get("delay_seconds", 3.0))
-    num_retries = int(corpus_cfg.get("num_retries", 5))
+    min_abstract_words = _config_int(corpus_cfg, "min_abstract_words", 40)
+    delay_seconds = _config_float(corpus_cfg, "delay_seconds", 3.0)
+    num_retries = _config_int(corpus_cfg, "num_retries", 5)
+
+    window = date_clause(start_year) if start_year is not None else ""
+    if window:
+        LOGGER.info("Recency window applied to every regime query: %s", window)
 
     client = build_client(corpus_cfg)
-    seen_ids: set[str] = set()
+    seen_ids: set[str] = {str(item) for item in seed_identifiers if item}
     seen_titles: set[str] = set()
+    if seen_ids:
+        LOGGER.info(
+            "Pre-registering %d seeding arXiv IDs so none is harvested twice",
+            len(seen_ids),
+        )
     papers: list[dict[str, Any]] = []
 
     for regime_cfg in regimes:
@@ -443,6 +504,7 @@ def harvest_all(config: dict[str, Any]) -> dict[str, Any]:
                 min_abstract_words=min_abstract_words,
                 delay_seconds=delay_seconds,
                 num_retries=num_retries,
+                date_range=window,
             )
         )
 
@@ -454,9 +516,10 @@ def harvest_all(config: dict[str, Any]) -> dict[str, Any]:
         "metadata": {
             "generated_by": "src.harvest",
             "source": "arXiv API via arxiv python client",
-            "target_per_regime": target_per_regime,
-            "total_papers": len(papers),
+            "n_papers": len(papers),
             "regime_counts": counts,
+            "harvest_start_year": start_year,
+            "date_clause": window or None,
             "review_exclusion_keywords": exclude_keywords,
             "review_exclusion_abstract_patterns": abstract_patterns,
             "queries": {str(r["label"]): r["query"] for r in regimes},
@@ -539,29 +602,37 @@ def verify_corpus(corpus: dict[str, Any], target_per_regime: int) -> bool:
     for label, items in sorted(regimes.items()):
         ids = {item["id"] for item in items}
         titles = {normalize_title(item["title"]) for item in items}
-        status = "OK" if len(items) == target_per_regime else "MISMATCH"
+        harvested = sum(1 for item in items if not item.get("is_seed"))
+        seeds = len(items) - harvested
+        # Seeds join whichever regime they were assigned to, so a regime holds
+        # its harvest quota plus its seeds.  Only a shortfall is an error.
+        status = "OK" if harvested == target_per_regime else "SHORT"
         LOGGER.info(
-            "  %-10s %3d papers (unique ids=%d, unique titles=%d) -> %s",
+            "  %-10s %3d papers = %d harvested + %d seeds "
+            "(unique ids=%d, unique titles=%d) -> %s",
             label,
             len(items),
+            harvested,
+            seeds,
             len(ids),
             len(titles),
             status,
         )
-        if len(items) != target_per_regime:
+        if harvested != target_per_regime:
             ok = False
         if len(ids) != len(items) or len(titles) != len(items):
             LOGGER.error("  %s contains duplicate IDs or titles", label)
             ok = False
 
-    if len(papers) != target_per_regime * len(regimes):
-        LOGGER.error(
-            "Total corpus size %d != %d (regimes x target)",
-            len(papers),
-            target_per_regime * len(regimes),
-        )
-        ok = False
+    doc_labels = [str(paper.get("doc")) for paper in papers]
+    if any(label for label in doc_labels):
+        expected = [f"doc {position}" for position in range(1, len(papers) + 1)]
+        if doc_labels != expected:
+            LOGGER.error("Document labels are not sequential from 'doc 1'")
+            ok = False
 
+    seeded = sum(1 for paper in papers if paper.get("is_seed"))
+    LOGGER.info("  %d seeding papers, %d harvested", seeded, len(papers) - seeded)
     return ok
 
 
@@ -705,17 +776,38 @@ _ABSTRACT_HEADING_RE = re.compile(
 #: Front matter is only stripped when it is genuinely at the front of the file.
 FRONT_MATTER_LIMIT = 3000
 
+#: When a PDF has no "Abstract" heading at all (some conference templates jump
+#: straight into the intro), only the first few hundred characters are the title
+#: block.  Capping the fallback there keeps prose out of the metadata parser.
+FRONT_MATTER_FALLBACK_CHARS = 800
+
+
+def split_front_matter(
+    raw: str, max_prefix_chars: int = FRONT_MATTER_LIMIT
+) -> tuple[str, str]:
+    """Split raw text into ``(body, title_block)`` at the abstract heading.
+
+    The second element is the text that ``strip_front_matter`` removes, and is
+    the only place a document states its own title and authors.  When no
+    abstract heading exists, the title block falls back to the first
+    ``FRONT_MATTER_FALLBACK_CHARS`` characters and the body is returned whole.
+    """
+    if not raw:
+        return raw, ""
+    match = _ABSTRACT_HEADING_RE.search(raw, 0, max_prefix_chars)
+    if match is None:
+        return raw, raw[:FRONT_MATTER_FALLBACK_CHARS].strip()
+    body = raw[match.end() :].lstrip("\n\t ")
+    return body, raw[: match.start()].strip()
+
 
 def strip_front_matter(
     raw: str, max_prefix_chars: int = FRONT_MATTER_LIMIT
 ) -> tuple[str, int]:
     """Drop the title/author/affiliation block preceding the abstract."""
-    if not raw:
-        return raw, 0
-    match = _ABSTRACT_HEADING_RE.search(raw, 0, max_prefix_chars)
-    if match is None:
-        return raw, 0
-    body = raw[match.end() :].lstrip("\n\t ")
+    body, front_matter = split_front_matter(raw, max_prefix_chars)
+    if not front_matter:
+        return body, 0
     return body, len(raw) - len(body)
 
 
@@ -829,7 +921,9 @@ _CITATION_BRACKET_NAMED_RE = re.compile(r"\[[A-Z][^\]\n]{0,48}(?:19|20)\d{2}[a-z
 #: deliberately CASE-SENSITIVE: lowercase "in"/"over" introduces an interval
 #: ("x in [0, 1]"), while sentence-initial "In" introduces a citation
 #: ("In [12] we show").
-_BRACKET_SYMBOL_GUARD_RE = re.compile(r"[\u2208\u2282\u2286=< >\u2264\u2265(+\-/]\s*$".replace("< >", "<>"))
+_BRACKET_SYMBOL_GUARD_RE = re.compile(
+    r"[\u2208\u2282\u2286=< >\u2264\u2265(+\-/]\s*$".replace("< >", "<>")
+)
 #: Guard words are case-insensitive EXCEPT ``in``.  "In [12] we show" is a
 #: sentence-initial citation; "x in [0, 1]" is an interval.  No other guard word
 #: is commonly used to introduce a citation, so they can be caught in any case
@@ -840,7 +934,11 @@ _BRACKET_WORD_GUARD_RE = re.compile(
     r"|bounds?|grid|over|covering|region)\s*$)"
 )
 _CITATION_BRACKET_GUARD_RE = re.compile(
-    "(?:" + _BRACKET_SYMBOL_GUARD_RE.pattern + "|" + _BRACKET_WORD_GUARD_RE.pattern + ")"
+    "(?:"
+    + _BRACKET_SYMBOL_GUARD_RE.pattern
+    + "|"
+    + _BRACKET_WORD_GUARD_RE.pattern
+    + ")"
 )
 
 #: A surname written just before a numeric citation ("see Smith et al. [12]").
@@ -928,9 +1026,10 @@ def strip_running_headers(raw: str, repeat_threshold: int = 3) -> tuple[str, int
         stripped = line.strip()
         # Running heads carry words; a repeated line of bare numbers is table
         # data and must survive.
-        if 6 <= len(stripped) <= 80 and sum(
-            1 for char in stripped if char.isalpha()
-        ) >= 8:
+        if (
+            6 <= len(stripped) <= 80
+            and sum(1 for char in stripped if char.isalpha()) >= 8
+        ):
             counts[stripped] = counts.get(stripped, 0) + 1
     repeated = {line for line, count in counts.items() if count >= repeat_threshold}
     if repeated:
@@ -1022,6 +1121,9 @@ class SanitationResult:
     removed_acknowledgments: int = 0
     removed_citations: int = 0
     removed_headers: int = 0
+    #: The title/author block that ``strip_front_matter`` removed.  Kept because
+    #: it is the only place a seeding PDF states its own title and authors.
+    front_matter_text: str = ""
 
     @property
     def removed_total(self) -> int:
@@ -1055,16 +1157,23 @@ def sanitize_document_text(
     then callouts are removed from what remains of the body.
     """
     without_headers, headers = strip_running_headers(raw)
-    body, front_matter = strip_front_matter(without_headers)
+    # The title block is read from the RAW text: the running-header pass removes
+    # any line that repeats on several pages, and a paper whose title is stamped
+    # on every page would otherwise lose its own title.
+    _, front_matter_text = split_front_matter(raw, min(FRONT_MATTER_LIMIT, len(raw)))
+    body, _ = split_front_matter(without_headers)
     body, references, acknowledgments = strip_bibliography(body, min_body_words)
     body, citations = strip_citation_callouts(body)
     return SanitationResult(
         text=normalize_extracted_text(body),
-        removed_front_matter=front_matter,
+        removed_front_matter=(
+            len(without_headers) - len(body) if front_matter_text else 0
+        ),
         removed_references=references,
         removed_acknowledgments=acknowledgments,
         removed_citations=citations,
         removed_headers=headers,
+        front_matter_text=front_matter_text,
     )
 
 
@@ -1184,9 +1293,7 @@ def assess_text_quality(
             f"mean word length {mean_word_length:.2f} outside [{low}, {high}]"
         )
     if alnum_ratio <= min_alnum_ratio:
-        reasons.append(
-            f"alphanumeric ratio {alnum_ratio:.3f} <= {min_alnum_ratio}"
-        )
+        reasons.append(f"alphanumeric ratio {alnum_ratio:.3f} <= {min_alnum_ratio}")
     return TextQuality(
         words=word_count,
         chars=char_count,
@@ -1310,6 +1417,12 @@ class ExtractedDocument:
     quality: TextQuality
     attempts: list[str] = field(default_factory=list)
     sanitation: dict[str, Any] = field(default_factory=dict)
+    #: Original PDF filename for seeding papers ('' for harvested papers).
+    source_file: str = ""
+    #: Publication year inferred from the seed PDF, when one could be found.
+    year: int | None = None
+    #: Author list recovered from the seed PDF's title block.
+    authors: list[str] = field(default_factory=list)
 
 
 def _seed_identifier(path: Path) -> str:
@@ -1318,18 +1431,603 @@ def _seed_identifier(path: Path) -> str:
     return match.group(1) if match else ""
 
 
+# --------------------------------------------------------------------------- #
+# Seed-First Expansion: seed year, dynamic cutoff, regime assignment
+# --------------------------------------------------------------------------- #
+
+#: Years considered plausible publication years when scanning seed text.
+EARLIEST_PLAUSIBLE_YEAR = 1980
+
+#: How much of a seed's text to scan for its publication year and abstract.
+SEED_HEAD_CHARS = 5000
+SEED_ABSTRACT_CHARS = 3000
+SEED_ABSTRACT_WORDS = 200
+
+_YEAR_RE = re.compile(r"\b(19[89]\d|20[0-5]\d)\b")
+_ARXIV_ID_RE = re.compile(r"^(\d{2})(\d{2})\.\d{4,5}")
+#: The stamp arXiv prints in the margin of every preprint: ``arXiv:2103.07945v3``.
+_ARXIV_STAMP_RE = re.compile(r"arXiv:(\d{2})(\d{2})\.\d{4,5}")
+#: Filename of the title-lookup cache kept beside the extracted full text.
+SEED_ARXIV_CACHE = "seed_arxiv_ids.json"
+
+#: A seed's abstract ends at one of these headings (Sec. 5.2 consumes full text,
+#: but the corpus schema wants an abstract too, so it is recovered from the body).
+_ABSTRACT_END_RE = re.compile(
+    r"(?im)^[ \t]*(?:(?:\d{1,2}|[IVX]{1,4})\.?[ \t]+)?"
+    r"(?:introduction|index terms|keywords|ccs concepts|i\.[ \t]+introduction)\b"
+)
+
+
+def infer_seed_year(
+    identifier: str,
+    text: str,
+    filename: str = "",
+    front_matter: str = "",
+    current_year: int | None = None,
+) -> tuple[int | None, str]:
+    """Infer a seeding paper's publication year, most reliable source first.
+
+    Order: the arXiv identifier when the filename carries one (``YYMM.NNNNN``),
+    then an arXiv stamp printed in the front matter, then the modal year in the
+    front matter, then a year embedded in the filename, and only last the modal
+    year of the body text.  The body is the weakest source because a paper
+    mentions the years of the work it builds on.
+
+    Returns ``(year, source)`` so the caller can log which rule fired; ``None``
+    is honest, and the caller then excludes the seed from the cutoff.
+    """
+    now = current_year or datetime.now().year
+    ceiling = now + 1
+
+    def _plausible(values: list[str]) -> list[int]:
+        return [
+            int(value)
+            for value in values
+            if EARLIEST_PLAUSIBLE_YEAR <= int(value) <= ceiling
+        ]
+
+    def _modal(years: list[int]) -> int:
+        # Most frequent wins; ties break to the earliest year, because a later
+        # year on the first page is usually a revision or a reprint notice.
+        counts = Counter(years)
+        return min(counts, key=lambda year: (-counts[year], year))
+
+    match = _ARXIV_ID_RE.match(identifier)
+    if match:
+        year = 2000 + int(match.group(1))
+        month = int(match.group(2))
+        if 1 <= month <= 12 and EARLIEST_PLAUSIBLE_YEAR <= year <= ceiling:
+            return year, "arxiv-id"
+
+    stamp = _ARXIV_STAMP_RE.search(front_matter)
+    if stamp:
+        year = 2000 + int(stamp.group(1))
+        month = int(stamp.group(2))
+        if 1 <= month <= 12 and EARLIEST_PLAUSIBLE_YEAR <= year <= ceiling:
+            return year, "arxiv-stamp"
+
+    front_years = _plausible(_YEAR_RE.findall(front_matter))
+    if front_years:
+        return _modal(front_years), "front-matter"
+
+    name_years = _plausible(_YEAR_RE.findall(filename))
+    if name_years:
+        return min(name_years), "filename"
+
+    body_years = _plausible(_YEAR_RE.findall(text))
+    if body_years:
+        return _modal(body_years), "body"
+    return None, "unknown"
+
+
+def seed_abstract(text: str, max_words: int = SEED_ABSTRACT_WORDS) -> str:
+    """Recover an abstract-like summary from a seed's sanitised body text."""
+    body = text.strip()
+    if body[:8].lower() == "abstract":
+        body = body[8:].lstrip(" .:-\u2014\u2013")
+    window = body[:SEED_ABSTRACT_CHARS]
+    match = _ABSTRACT_END_RE.search(window)
+    if match and match.start() > 120:
+        window = window[: match.start()]
+    return " ".join(window.split()[:max_words]).strip()
+
+
+def seed_matching_text(
+    document: ExtractedDocument, limit: int = SEED_HEAD_CHARS
+) -> str:
+    """The text used to match a seed against regime centroids.
+
+    Title plus abstract is the paper's own statement of what it is about.  The
+    full body is dominated by method detail and notation, which is shared across
+    regimes: on this corpus the head of the document lifts the top cosine score
+    from 0.006-0.059 to 0.030-0.195 and roughly halves the number of draws the
+    margin rule flags as ambiguous.
+    """
+    head = document.text[:limit]
+    return head if head else document.text
+
+
+def harvest_start_year(
+    seed_years: Iterable[int | None],
+    config: dict[str, Any],
+    current_year: int | None = None,
+) -> int:
+    """Earliest year a harvested paper may carry: ``min(seed_years) - offset``.
+
+    Clamped so the lookback never exceeds ``corpus.lookback_years`` (Obayashi et
+    al. 2026, Sec. 5.1), which keeps the window anchored to the present instead
+    of following a very old seed arbitrarily far back.
+    """
+    corpus_cfg = config.get("corpus", {}) or {}
+    offset = _config_int(corpus_cfg, "seed_year_offset", 2)
+    lookback = _config_int(corpus_cfg, "lookback_years", 10)
+    now = current_year or datetime.now().year
+    floor = now - lookback
+
+    known = [int(year) for year in seed_years if year is not None]
+    if not known:
+        LOGGER.warning(
+            "No seed year could be inferred; falling back to the %d-year lookback "
+            "floor (%d)",
+            lookback,
+            floor,
+        )
+        return floor
+
+    earliest = min(known)
+    start = max(earliest - offset, floor)
+    LOGGER.info(
+        "Dynamic cutoff: earliest seed year %d - offset %d = %d, clamped by the "
+        "%d-year lookback floor %d -> harvesting from %d",
+        earliest,
+        offset,
+        earliest - offset,
+        lookback,
+        floor,
+        start,
+    )
+    return start
+
+
+def date_clause(start_year: int, end_year: int | None = None) -> str:
+    """Build the arXiv ``submittedDate`` range appended to every regime query."""
+    last = end_year or datetime.now().year
+    return f"submittedDate:[{start_year}01010000 TO {last}12312359]"
+
+
+def regime_reference_texts(config: dict[str, Any]) -> dict[int, str]:
+    """Keyword bundle per regime, used only for seed matching, never as a query."""
+    domains = config.get("search_domains") or []
+    by_name = {
+        str(entry.get("name", "")): [str(word) for word in entry.get("keywords", [])]
+        for entry in domains
+        if isinstance(entry, dict)
+    }
+    references: dict[int, str] = {}
+    for regime in config.get("regimes", []):
+        keywords = regime.get("keywords")
+        if not keywords:
+            keywords = by_name.get(str(regime.get("name", "")), [])
+        parts = [str(regime.get("name", ""))]
+        if regime.get("description"):
+            parts.append(str(regime["description"]))
+        parts.extend(str(word) for word in keywords)
+        references[int(regime["id"])] = " ".join(parts)
+    return references
+
+
+def _lookup_seed_override(
+    overrides: dict[str, Any], filename: str, identifier: str
+) -> int | None:
+    """Resolve an explicit seed override by filename, stem, or arXiv ID."""
+    stem = Path(filename).stem
+    for key in (filename, stem, identifier):
+        if key and key in overrides:
+            try:
+                return int(overrides[key])
+            except (TypeError, ValueError):
+                LOGGER.error(
+                    "seed_overrides[%r] = %r is not an integer regime id",
+                    key,
+                    overrides[key],
+                )
+                return None
+    return None
+
+
+def assign_seed_regimes(
+    seeds: list[ExtractedDocument],
+    config: dict[str, Any],
+    harvested_documents: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Assign every seed to a regime: explicit override first, else TF-IDF cosine.
+
+    The fallback centroid for a regime is the mean of its harvested documents'
+    TF-IDF vectors plus its keyword bundle, so a seed is matched against what the
+    regime actually looks like in this corpus rather than against the wording of
+    the query alone.
+
+    Returns one record per seed with ``regime_id``, ``similarity``, ``margin`` and
+    ``assigned_by`` (``"override"`` or ``"similarity"``) for auditability.
+    """
+    corpus_cfg = config.get("corpus", {}) or {}
+    overrides = corpus_cfg.get("seed_overrides") or {}
+    margin_threshold = float(corpus_cfg.get("seed_match_margin", 0.02))
+    regimes = list(config.get("regimes", []))
+    if not regimes:
+        raise SystemExit("config.yaml defines no regimes")
+
+    references = regime_reference_texts(config)
+    regime_ids = [int(regime["id"]) for regime in regimes]
+    labels = {int(regime["id"]): str(regime["label"]) for regime in regimes}
+
+    seed_texts = [seed_matching_text(doc) for doc in seeds]
+    reference_texts = [references.get(rid, "") for rid in regime_ids]
+    harvested = harvested_documents or []
+    harvested_texts = [str(item.get("text", "")) for item in harvested]
+    harvested_regimes = [int(item.get("regime_id", -1)) for item in harvested]
+
+    vectorizer = TfidfVectorizer(
+        stop_words="english", ngram_range=(1, 2), sublinear_tf=True, min_df=1
+    )
+    matrix = vectorizer.fit_transform([*seed_texts, *reference_texts, *harvested_texts])
+    n_seeds = len(seed_texts)
+    n_refs = len(reference_texts)
+
+    seed_rows = matrix[0:n_seeds]
+    reference_rows = matrix[n_seeds : n_seeds + n_refs]
+    harvested_rows = matrix[n_seeds + n_refs :]
+
+    centroids = np.zeros((len(regime_ids), matrix.shape[1]), dtype=float)
+    for position, regime_id in enumerate(regime_ids):
+        members = [
+            index for index, rid in enumerate(harvested_regimes) if rid == regime_id
+        ]
+        centroid = np.asarray(reference_rows[position].todense()).ravel().astype(float)
+        if members:
+            member_rows = harvested_rows[members]
+            centroid = (
+                centroid * 0.25 + np.asarray(member_rows.mean(axis=0)).ravel() * 0.75
+            )
+        norm = float(np.linalg.norm(centroid))
+        centroids[position] = centroid / norm if norm > 0 else centroid
+
+    seed_dense = np.asarray(seed_rows.todense(), dtype=float)
+    norms = np.linalg.norm(seed_dense, axis=1, keepdims=True)
+    seed_dense = np.divide(
+        seed_dense, norms, out=np.zeros_like(seed_dense), where=norms > 0
+    )
+    scores = seed_dense @ centroids.T
+
+    assignments: list[dict[str, Any]] = []
+    for position, document in enumerate(seeds):
+        filename = document.source_file or document.identifier
+        override = _lookup_seed_override(overrides, filename, document.identifier)
+        rank_scores = sorted(scores[position], reverse=True)
+        margin = float(rank_scores[0] - rank_scores[1]) if len(rank_scores) > 1 else 0.0
+        best = regime_ids[int(np.argmax(scores[position]))]
+
+        if override is not None and override in labels:
+            chosen, assigned_by = override, "override"
+            LOGGER.info(
+                "  seed %-46s -> %-9s (explicit seed_overrides)",
+                filename[:46],
+                labels[chosen],
+            )
+        elif override is not None:
+            assigned_by = "similarity"
+            chosen = best
+            LOGGER.error(
+                "  seed %s: seed_overrides names regime %d, which config.yaml does "
+                "not define; falling back to similarity (%s)",
+                filename,
+                override,
+                labels[chosen],
+            )
+        else:
+            chosen, assigned_by = best, "similarity"
+            LOGGER.info(
+                "  seed %-46s -> %-9s (cosine %.3f, margin %.3f)%s",
+                filename[:46],
+                labels[chosen],
+                float(scores[position, int(np.argmax(scores[position]))]),
+                margin,
+                "  [AMBIGUOUS]" if margin < margin_threshold else "",
+            )
+            if margin < margin_threshold:
+                LOGGER.warning(
+                    "  seed %s is ambiguous (margin %.4f < %.4f); add it to "
+                    "corpus.seed_overrides in config.yaml to pin the regime",
+                    filename,
+                    margin,
+                    margin_threshold,
+                )
+
+        assignments.append(
+            {
+                "regime_id": int(chosen),
+                "regime_label": labels[int(chosen)],
+                "assigned_by": assigned_by,
+                "similarity": round(
+                    float(scores[position, regime_ids.index(int(chosen))]), 4
+                ),
+                "margin": round(margin, 4),
+            }
+        )
+    return assignments
+
+
+def parse_seed_metadata(front_matter: str) -> tuple[str, list[str]]:
+    """Recover a seeding PDF's title and author list from its title block.
+
+    The front matter is the only place a PDF states its own title and authors,
+    and it is exactly what ``strip_front_matter`` throws away for the body text.
+    Parsing it beats using the filename (``cassie biped``) as a title, which
+    would put nonsense labels on the map.
+
+    Titles and author lists are separated by blank lines in every template in
+    use, so the block is split into paragraphs rather than lines: the first
+    paragraph is the title, and author paragraphs follow until a paragraph
+    yields no names (which is where affiliations and prose begin).
+
+    Returns ``("", [])`` when nothing trustworthy is found, so callers can fall
+    back to the filename instead of inventing metadata.
+    """
+    if not front_matter.strip():
+        return "", []
+
+    paragraphs: list[str] = []
+    for raw_paragraph in re.split(r"\n\s*\n", front_matter):
+        if any(line.strip() for line in raw_paragraph.splitlines()):
+            paragraphs.append(raw_paragraph.strip("\n"))
+    if not paragraphs:
+        return "", []
+
+    # Venue notices and arXiv stamps form whole paragraphs of their own
+    # ("Published as a conference paper at ICLR 2025"), so they are skipped
+    # paragraph-wise before the title is read.
+    while paragraphs and all(
+        _is_boilerplate_line(line.strip())
+        for line in paragraphs[0].splitlines()
+        if line.strip()
+    ):
+        paragraphs.pop(0)
+    if not paragraphs:
+        return "", []
+
+    title = " ".join(
+        line.strip()
+        for line in paragraphs[0].splitlines()
+        if line.strip() and not _is_boilerplate_line(line.strip())
+    ).strip(" .,;:")
+    words = title.split()
+    # A real title is short, free of e-mail addresses, and carries words.  A
+    # long first paragraph means the template has no title block at all.
+    if len(words) < 3 or len(words) > 30 or "@" in title:
+        return "", []
+
+    authors: list[str] = []
+    for paragraph in paragraphs[1:]:
+        lines = [line.strip() for line in paragraph.splitlines() if line.strip()]
+        # Two author templates are in use: one name per line, and
+        # "NAME, Affiliation, Country" on every line.  When any line splits
+        # cleanly into nothing but names, trust those lines only -- that is the
+        # strict reading and it keeps institution names out of the list.
+        strict = [
+            line
+            for line in lines
+            if line.split()
+            and all(
+                _clean_author_name(candidate)
+                for candidate in re.split(r",|\band\b|&|\s{2,}", line)
+                if candidate.strip()
+            )
+        ]
+        found: list[str] = []
+        for line in strict or lines:
+            for candidate in re.split(r",|\band\b|&|\s{2,}", line):
+                name = _clean_author_name(candidate)
+                if name and name not in authors:
+                    found.append(name)
+        if not found:
+            # The first paragraph with no names is the affiliation block; stop
+            # there so body prose can never be mistaken for an author list.
+            break
+        authors.extend(found)
+        if len(authors) > 40:
+            break
+    return title, authors[:40]
+
+
+#: Publisher / venue furniture that precedes a title, never part of it.
+_BOILERPLATE_RE = re.compile(
+    r"^(?:arxiv:|published\s+as|preprint\b|under\s+review|accepted\b|proceedings\b"
+    r"|copyright\b|\u00a9|doi\b|https?://|www\.|this\s+is\s+a\s+preprint)",
+    re.IGNORECASE,
+)
+
+#: Tokens that mark a line as an affiliation, an e-mail, or a venue notice.
+_AFFILIATION_RE = re.compile(
+    r"(?:@|universit|institut|laborator|college|school\s+of|department|dept\.?\b"
+    r"|inc\b|ltd\b|corp\b|gmbh\b|research\b|\bai\b|\bnvidia\b|\bmeta\b|\bdeepseek"
+    r"|\bopenai\b|\bgoogle\b|\bmicrosoft\b|\bamazon\b|\bapple\b|\bbosch\b"
+    r"|academy|centre|center\b|faculty|fellowship|scholarship)",
+    re.IGNORECASE,
+)
+
+_AUTHOR_NAME_RE = re.compile(
+    r"^[A-Z][A-Za-z'\u2019-]*(?:\s+[A-Z][A-Za-z'\u2019.-]*){1,3}$"
+)
+
+
+def _is_boilerplate_line(line: str) -> bool:
+    """True for venue/arXiv/page furniture that precedes a title."""
+    if _BOILERPLATE_RE.match(line):
+        return True
+    # A bare page number or a bare email address line.
+    return bool(re.fullmatch(r"\d{1,4}", line)) or "@" in line
+
+
+def _looks_like_author_line(line: str) -> bool:
+    """True when a line reads as a comma-separated list of personal names."""
+    candidates = [part for part in re.split(r",|\band\b", line) if part.strip()]
+    named = [part for part in candidates if _clean_author_name(part)]
+    return len(named) >= 2 and len(named) >= len(candidates) - 1
+
+
+def _looks_like_affiliation_line(line: str) -> bool:
+    """True when a line is an affiliation, e-mail, or footnote marker."""
+    return bool(_AFFILIATION_RE.search(line)) or line.startswith(("*∗", "*†", "*‡"))
+
+
+#: Institution and lab names that appear inside author blocks.  A candidate
+#: containing one of these is an affiliation, never an author.  This catches the
+#: "ETH Zurich" style leak where an affiliation line still looks like two
+#: capitalised words.
+_INSTITUTION_TOKENS = frozenset(
+    {
+        "eth",
+        "nvidia",
+        "mila",
+        "meta",
+        "fair",
+        "google",
+        "deepmind",
+        "openai",
+        "deepseek",
+        "microsoft",
+        "amazon",
+        "apple",
+        "bosch",
+        "aist",
+        "cmu",
+        "ucl",
+        "mit",
+        "epfl",
+        "kaist",
+        "tsinghua",
+        "princeton",
+        "carnegie",
+        "stanford",
+        "berkeley",
+        "oxford",
+        "cambridge",
+    }
+)
+
+
+def _clean_author_name(raw: str) -> str:
+    """Strip footnote markers from a candidate author token, or return ''."""
+    token = re.sub(r"[\d\*∗†‡§¶,;]", " ", raw)
+    token = " ".join(token.split()).strip(" .")
+    if not token or _AFFILIATION_RE.search(token):
+        return ""
+    if {word.lower() for word in token.split()} & _INSTITUTION_TOKENS:
+        return ""
+    if not _AUTHOR_NAME_RE.match(token):
+        return ""
+    return token
+
+
+def normalize_title_key(title: str) -> str:
+    """Case-, punctuation-, and space-insensitive key for exact title matching."""
+    folded = unicodedata.normalize("NFKD", title)
+    stripped = "".join(ch for ch in folded if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", "", stripped.lower())
+
+
+def _load_seed_arxiv_cache(cache_dir: Path) -> dict[str, Any]:
+    path = cache_dir / SEED_ARXIV_CACHE
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_seed_arxiv_cache(cache_dir: Path, cache: dict[str, Any]) -> None:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / SEED_ARXIV_CACHE
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with tmp_path.open("w", encoding="utf-8") as handle:
+        json.dump(cache, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    tmp_path.replace(path)
+
+
+def lookup_seed_arxiv(
+    title: str,
+    session: requests.Session,
+    cache: dict[str, Any],
+    cache_dir: Path,
+    delay_seconds: float = 3.0,
+) -> tuple[str | None, int | None]:
+    """Resolve a local seed PDF to its arXiv record by exact title match.
+
+    A seed saved under a free-form filename (``TD JEPA.pdf``) carries no
+    identifier, so its publication year cannot be derived from the filename and
+    its record has no public link.  An arXiv title search recovers both, but only
+    an exactly matching title is accepted - a near-miss title would attach the
+    wrong paper's year and URL to the seed, which is worse than no link at all.
+
+    Results are cached under ``data/fulltext_cache`` so a rebuild does not repeat
+    the query.
+    """
+    key = normalize_title_key(title)
+    if not key:
+        return None, None
+    cached = cache.get(key)
+    if isinstance(cached, dict):
+        identifier = cached.get("id")
+        year = cached.get("year")
+        return (
+            str(identifier) if identifier else None,
+            int(year) if isinstance(year, int) else None,
+        )
+
+    identifier: str | None = None
+    year: int | None = None
+    try:
+        client = arxiv.Client(page_size=5, delay_seconds=delay_seconds, num_retries=3)
+        search = arxiv.Search(query=f'ti:"{title}"', max_results=5)
+        for result in client.results(search):
+            if normalize_title_key(result.title) != key:
+                continue
+            identifier = result.get_short_id()
+            year = int(result.published.year)
+            break
+    except Exception as exc:  # noqa: BLE001 - the arXiv client raises broadly
+        LOGGER.warning("arXiv title lookup failed for %r: %s", title, exc)
+        return None, None
+
+    cache[key] = {"title": title, "id": identifier, "year": year}
+    _save_seed_arxiv_cache(cache_dir, cache)
+    if identifier:
+        LOGGER.info("  seed %r resolved to arXiv %s (%s)", title[:52], identifier, year)
+    else:
+        LOGGER.info("  seed %r has no exact arXiv title match", title[:52])
+    return identifier, year
+
+
 def extract_seed_documents(
     desired_dir: Path,
     session: requests.Session,
     delay_seconds: float = 3.0,
     gate: QualityGate | None = None,
+    cache_dir: Path | None = None,
 ) -> tuple[list[ExtractedDocument], list[Path]]:
     """Extract every seeding paper, falling back to ar5iv before giving up.
+
+    A seed whose filename carries no arXiv identifier is resolved against arXiv
+    by exact title, which supplies the publication year and a working link when
+    the PDF itself prints neither.
 
     Returns the usable documents and the list of PDFs that could not be
     recovered automatically, so the caller can name them for the user.
     """
     quality_gate = gate or QualityGate()
+    arxiv_cache = _load_seed_arxiv_cache(cache_dir) if cache_dir else {}
     documents: list[ExtractedDocument] = []
     failures: list[Path] = []
     pdfs = sorted(desired_dir.glob("*.pdf"))
@@ -1360,24 +2058,54 @@ def extract_seed_documents(
             if fallback_quality.ok:
                 result, quality, source = fallback, fallback_quality, "ar5iv"
 
+        parsed_title, parsed_authors = parse_seed_metadata(result.front_matter_text)
+        seed_year, year_source = infer_seed_year(
+            identifier,
+            result.text,
+            pdf_path.name,
+            front_matter=result.front_matter_text,
+        )
+
+        # A free-form filename leaves the seed with no identifier and often no
+        # year.  Look it up on arXiv by exact title; the cache keeps rebuilds
+        # offline.
+        if cache_dir and not _seed_identifier(pdf_path):
+            resolved_id, resolved_year = lookup_seed_arxiv(
+                parsed_title or pdf_path.stem,
+                session,
+                arxiv_cache,
+                cache_dir,
+                delay_seconds,
+            )
+            if resolved_id:
+                identifier = resolved_id
+                attempts.append("arxiv-title-match")
+                if seed_year is None and resolved_year is not None:
+                    seed_year, year_source = resolved_year, "arxiv-title-match"
+
         document = ExtractedDocument(
             identifier=identifier,
-            title=pdf_path.stem,
+            title=parsed_title or pdf_path.stem,
             text=result.text if quality.ok else "",
             source=source if quality.ok else "failed",
             quality=quality,
             attempts=attempts,
             sanitation=result.as_dict(),
+            source_file=pdf_path.name,
+            year=seed_year,
+            authors=parsed_authors,
         )
         documents.append(document)
         if quality.ok:
             LOGGER.info(
-                "  seed %-46s %6d words via %-9s refs=-%d cites=%d",
+                "  seed %-46s %6d words via %-9s refs=-%d cites=%d year=%s (%s)",
                 pdf_path.name[:46],
                 quality.words,
                 source,
                 result.removed_references + result.removed_acknowledgments,
                 result.removed_citations,
+                seed_year if seed_year is not None else "unknown",
+                year_source,
             )
         else:
             LOGGER.error(
@@ -1495,92 +2223,264 @@ def _sanitation_totals(documents: list[ExtractedDocument]) -> dict[str, int]:
     return {f"removed_{key}": value for key, value in sorted(totals.items())}
 
 
+def _seed_filename_slug(name: str) -> str:
+    """Stable, path-safe identifier for a seed that has no arXiv ID."""
+    stem = Path(name).stem
+    slug = re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-")
+    return f"seed:{slug or 'unnamed'}"
+
+
+def _seed_record(
+    document: ExtractedDocument,
+    position: int,
+    assignment: dict[str, Any],
+) -> dict[str, Any]:
+    """Build one corpus entry for a seeding paper (``doc 1``..``doc N``)."""
+    # The identifier may be an arXiv id even when the filename was free-form,
+    # because extract_seed_documents resolves those by exact title.  Test the
+    # identifier itself rather than the filename.
+    has_arxiv_id = bool(_ARXIV_ID_RE.match(document.identifier))
+    identifier = (
+        document.identifier
+        if has_arxiv_id
+        else _seed_filename_slug(document.source_file or document.identifier)
+    )
+    return {
+        "id": identifier,
+        "doc": f"doc {position}",
+        "is_seed": True,
+        "title": document.title,
+        "abstract": seed_abstract(document.text),
+        "authors": list(document.authors),
+        "year": document.year,
+        "regime_id": int(assignment["regime_id"]),
+        "regime_label": str(assignment["regime_label"]),
+        "full_text": document.text,
+        # --- provenance
+        "source_file": document.source_file,
+        "seed_assignment": {
+            "assigned_by": assignment["assigned_by"],
+            "similarity": assignment["similarity"],
+            "margin": assignment["margin"],
+        },
+        "extraction": {
+            "source": document.source,
+            "attempts": document.attempts,
+            **document.quality.as_dict(),
+        },
+        "sanitation": document.sanitation,
+    }
+
+
+def _harvested_record(
+    paper: dict[str, Any],
+    document: ExtractedDocument,
+    position: int,
+) -> dict[str, Any]:
+    """Build one corpus entry for a harvested paper (``doc 16``..``doc 120``)."""
+    record = {
+        "id": str(paper["id"]),
+        "doc": f"doc {position}",
+        "is_seed": False,
+        "title": str(paper["title"]),
+        "abstract": str(paper["abstract"]),
+        "authors": list(paper["authors"]),
+        "year": int(paper["year"]),
+        "regime_id": int(paper["regime_id"]),
+        "regime_label": str(paper["regime_label"]),
+        "full_text": document.text,
+        "extraction": {
+            "source": document.source,
+            "attempts": document.attempts,
+            **document.quality.as_dict(),
+        },
+        "sanitation": document.sanitation,
+    }
+    for key in (
+        "regime_name",
+        "entry_id",
+        "published",
+        "updated",
+        "primary_category",
+        "categories",
+        "doi",
+        "journal_ref",
+        "query",
+    ):
+        if key in paper:
+            record[key] = paper[key]
+    return record
+
+
 def build_fulltext_corpus(config: dict[str, Any]) -> dict[str, Any]:
-    """Run Phase 1: seeding papers first, then the whole analysis corpus."""
+    """Seed-First Expansion: build the whole corpus in one pass.
+
+    Order is load-bearing.  Seeds are extracted first because their publication
+    years decide the harvest window, and they are registered as already-seen IDs
+    so a seed that is itself on arXiv cannot be harvested a second time:
+
+    1. Extract and sanitise the seeding PDFs       -> ``doc 1``..``doc N``
+    2. Derive the recency cutoff from their years  -> ``min(seed_years) - 2``
+    3. Harvest ``target_per_regime`` papers per regime under that cutoff
+    4. Extract full text for the harvested papers  -> ``doc N+1``..``doc 120``
+    5. Assign each seed a regime (override, else TF-IDF cosine fallback)
+    6. Write ``data/corpus.json`` and ``data/corpus_fulltext.json``
+
+    The result contains only seeds plus this run's harvest: a rebuild never
+    inherits papers from an earlier corpus.
+    """
     fulltext_cfg = config.get("fulltext", {}) or {}
     corpus_cfg = config.get("corpus", {}) or {}
     corpus_path = Path(corpus_cfg.get("output_path", "data/corpus.json"))
     out_path = Path(fulltext_cfg.get("output_path", "data/corpus_fulltext.json"))
     desired_dir = Path(fulltext_cfg.get("seeds_dir", "docs/papers/desired"))
     cache_dir = Path(fulltext_cfg.get("cache_dir", "data/fulltext_cache"))
-    delay = float(fulltext_cfg.get("delay_seconds", corpus_cfg.get("delay_seconds", 3.0)))
+    delay = _config_float(fulltext_cfg, "delay_seconds", 3.0)
     gate = QualityGate.from_config(fulltext_cfg)
+    target_total = _config_int(corpus_cfg, "target_total_papers", 120)
 
-    corpus = load_corpus(corpus_path)
     session = requests.Session()
     session.headers.update({"User-Agent": FULLTEXT_USER_AGENT})
 
-    LOGGER.info("Extracting seeding papers from %s", desired_dir)
-    seeds, seed_failures = extract_seed_documents(desired_dir, session, delay, gate)
-
-    LOGGER.info("Extracting full text for %d corpus papers", len(corpus["papers"]))
-    corpus_docs, corpus_failures = extract_corpus_fulltext(
-        corpus, cache_dir, session, delay, gate
+    # --- 1. seeds -----------------------------------------------------------
+    LOGGER.info("Step 1/5: extracting seeding papers from %s", desired_dir)
+    seeds, seed_failures = extract_seed_documents(
+        desired_dir, session, delay, gate, cache_dir=cache_dir
+    )
+    if seed_failures:
+        names = ", ".join(path.name for path in seed_failures)
+        raise SystemExit(
+            "These seeding PDFs could not be extracted and are required by "
+            f"Seed-First Expansion: {names}"
+        )
+    if not seeds:
+        raise SystemExit(f"No seeding PDFs found under {desired_dir}")
+    LOGGER.info(
+        "Seeds extracted: %d documents, years %s",
+        len(seeds),
+        sorted({doc.year for doc in seeds if doc.year is not None}),
     )
 
-    by_id = {doc.identifier: doc for doc in corpus_docs}
-    papers: list[dict[str, Any]] = []
-    for paper in corpus["papers"]:
-        document = by_id[str(paper["id"])]
-        papers.append(
-            {
-                "id": paper["id"],
-                "title": paper["title"],
-                "abstract": paper["abstract"],
-                "full_text": document.text,
-                "authors": paper["authors"],
-                "year": paper["year"],
-                "regime_id": paper["regime_id"],
-                "regime_label": paper["regime_label"],
-                "extraction": {
-                    "source": document.source,
-                    "attempts": document.attempts,
-                    **document.quality.as_dict(),
-                },
-                "sanitation": document.sanitation,
-            }
+    # --- 2. dynamic cutoff --------------------------------------------------
+    start_year = harvest_start_year((doc.year for doc in seeds), config)
+
+    # --- 3. harvest ---------------------------------------------------------
+    per_regime = _config_int(corpus_cfg, "target_per_regime", 35)
+    LOGGER.info(
+        "Step 2/5: harvesting %d papers per regime (window from %d)",
+        per_regime,
+        start_year,
+    )
+    harvested = harvest_all(
+        config,
+        start_year=start_year,
+        seed_identifiers=(doc.identifier for doc in seeds),
+    )
+    harvested_papers = harvested["papers"]
+    if not harvested_papers:
+        raise SystemExit("Harvest returned no papers; check network and queries")
+
+    # --- 4. full text for the harvest ---------------------------------------
+    LOGGER.info(
+        "Step 3/5: extracting full text for %d harvested papers",
+        len(harvested_papers),
+    )
+    corpus_docs, corpus_failures = extract_corpus_fulltext(
+        {"papers": harvested_papers}, cache_dir, session, delay, gate
+    )
+    if corpus_failures:
+        raise SystemExit(
+            "Full text extraction failed for harvested papers: "
+            + ", ".join(corpus_failures)
         )
 
-    payload = {
-        "metadata": {
-            "generated_by": "src.harvest (Phase 1: full-text extraction)",
-            "reference": "Obayashi et al. (2026) Knowledge Manifold Optimization, Sec. 5.1-5.2",
-            "n_papers": len(papers),
-            "n_seeds": len(seeds),
-            "corpus_path": str(corpus_path),
-            "seeds_dir": str(desired_dir),
-            "extractor": "mutool (MuPDF) with ar5iv HTML fallback",
-            "quality_gate": gate.as_dict(),
-            "sanitation": {
-                "rule": (
-                    "Appendix A.1 Rule 4: no bibliographic fragments in the "
-                    "n-gram vocabulary or the evidence packages"
-                ),
-                "truncate_at_references": True,
-                "drop_trailing_acknowledgments": True,
-                "strip_citation_callouts": True,
-                "strip_running_headers": True,
-                **_sanitation_totals([*seeds, *corpus_docs]),
-            },
-            "failed_papers": corpus_failures,
-            "failed_seeds": [path.name for path in seed_failures],
+    # --- 5. seed regime assignment -----------------------------------------
+    LOGGER.info("Step 4/5: assigning each seed to a regime")
+    assignments = assign_seed_regimes(
+        seeds,
+        config,
+        [
+            {"text": doc.text, "regime_id": paper["regime_id"]}
+            for doc, paper in zip(corpus_docs, harvested_papers, strict=True)
+        ],
+    )
+
+    # --- 6. unify -----------------------------------------------------------
+    papers: list[dict[str, Any]] = []
+    for position, (document, assignment) in enumerate(
+        zip(seeds, assignments, strict=True), start=1
+    ):
+        papers.append(_seed_record(document, position, assignment))
+    offset = len(papers)
+    for index, (paper, document) in enumerate(
+        zip(harvested_papers, corpus_docs, strict=True), start=1
+    ):
+        papers.append(_harvested_record(paper, document, offset + index))
+
+    if len(papers) != target_total:
+        LOGGER.warning(
+            "Corpus has %d documents, config wants %d (seeds %d + harvested %d)",
+            len(papers),
+            target_total,
+            len(seeds),
+            len(harvested_papers),
+        )
+
+    counts: dict[str, int] = {}
+    seed_counts: dict[str, int] = {}
+    for paper in papers:
+        label = str(paper["regime_label"])
+        counts[label] = counts.get(label, 0) + 1
+        if paper["is_seed"]:
+            seed_counts[label] = seed_counts.get(label, 0) + 1
+
+    sanitation_totals = _sanitation_totals([*seeds, *corpus_docs])
+
+    metadata = {
+        "generated_by": "src.harvest (Seed-First Expansion, Phase 1)",
+        "reference": (
+            "Obayashi et al. (2026) Knowledge Manifold Optimization, "
+            "Sec. 5.1-5.2 and Appendix A.1"
+        ),
+        "n_papers": len(papers),
+        "n_seeds": len(seeds),
+        "n_harvested": len(harvested_papers),
+        "regime_counts": counts,
+        "seed_regime_counts": seed_counts,
+        "harvest_start_year": start_year,
+        "date_clause": harvested["metadata"].get("date_clause"),
+        "seed_years": {doc.source_file: doc.year for doc in seeds},
+        "seeds_dir": str(desired_dir),
+        "corpus_path": str(corpus_path),
+        "extractor": "mutool (MuPDF) with ar5iv HTML fallback",
+        "quality_gate": gate.as_dict(),
+        "sanitation": {
+            "rule": (
+                "Appendix A.1 Rule 4: no bibliographic fragments in the "
+                "n-gram vocabulary or the evidence packages"
+            ),
+            "truncate_at_references": True,
+            "drop_trailing_acknowledgments": True,
+            "strip_citation_callouts": True,
+            "strip_running_headers": True,
+            **sanitation_totals,
         },
-        "papers": papers,
-        "seeds": [
-            {
-                "identifier": doc.identifier,
-                "title": doc.title,
-                "full_text": doc.text,
-                "extraction": {
-                    "source": doc.source,
-                    "attempts": doc.attempts,
-                    **doc.quality.as_dict(),
-                },
-                "sanitation": doc.sanitation,
-            }
-            for doc in seeds
+        "queries": harvested["metadata"].get("queries"),
+        "failed_papers": [],
+        "failed_seeds": [],
+    }
+
+    payload = {"metadata": metadata, "papers": papers}
+
+    # corpus.json carries metadata only; corpus_fulltext.json adds the text.
+    corpus_payload = {
+        "metadata": {**metadata, "generated_by": "src.harvest (Seed-First)"},
+        "papers": [
+            {key: value for key, value in paper.items() if key != "full_text"}
+            for paper in papers
         ],
     }
+    write_corpus(corpus_payload, corpus_path)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
@@ -1590,25 +2490,22 @@ def build_fulltext_corpus(config: dict[str, Any]) -> dict[str, Any]:
     tmp_path.replace(out_path)
 
     LOGGER.info(
-        "Wrote full text for %d/%d corpus papers and %d seeds to %s",
-        len(papers) - len(corpus_failures),
+        "Step 5/5: wrote %d documents (%d seeds + %d harvested) to %s",
         len(papers),
-        len(seeds) - len(seed_failures),
+        len(seeds),
+        len(harvested_papers),
         out_path,
     )
-    if seed_failures:
-        LOGGER.error(
-            "These seeding PDFs could not be extracted automatically and need "
-            "manual text: %s",
-            ", ".join(path.name for path in seed_failures),
-        )
     return payload
 
 
 def verify_fulltext(
-    path: Path, expected_papers: int, gate: QualityGate | None = None
+    path: Path,
+    expected_papers: int,
+    gate: QualityGate | None = None,
+    expected_seeds: int | None = None,
 ) -> bool:
-    """Validate the Phase 1 artifact: schema, quality gate, and coverage."""
+    """Validate the Seed-First corpus: schema, seeding, quality, and coverage."""
     quality_gate = gate or QualityGate()
     try:
         with path.open("r", encoding="utf-8") as handle:
@@ -1622,12 +2519,15 @@ def verify_fulltext(
 
     required = (
         "id",
+        "doc",
+        "is_seed",
         "title",
         "abstract",
         "full_text",
         "authors",
         "year",
         "regime_id",
+        "regime_label",
     )
     papers = payload.get("papers", [])
     ok = True
@@ -1641,9 +2541,10 @@ def verify_fulltext(
 
     ids: set[str] = set()
     regimes: dict[str, int] = {}
+    seeded = 0
     shortest = 10**9
     remnants = 0
-    for paper in papers:
+    for position, paper in enumerate(papers, start=1):
         missing = [name for name in required if name not in paper]
         if missing:
             LOGGER.error("Paper %r missing fields %s", paper.get("id"), missing)
@@ -1653,6 +2554,25 @@ def verify_fulltext(
             LOGGER.error("Duplicate paper id %r", paper["id"])
             ok = False
         ids.add(paper["id"])
+        if paper["doc"] != f"doc {position}":
+            LOGGER.error(
+                "Paper %r carries %r at position %d; doc ids must be sequential",
+                paper["id"],
+                paper["doc"],
+                position,
+            )
+            ok = False
+        if not isinstance(paper["is_seed"], bool):
+            LOGGER.error("Paper %r has non-boolean 'is_seed'", paper["id"])
+            ok = False
+        if paper["is_seed"]:
+            seeded += 1
+            if not paper["authors"]:
+                LOGGER.error("Seed %r has no recoverable authors", paper["id"])
+                ok = False
+            if not isinstance(paper["year"], int):
+                LOGGER.error("Seed %r has no inferred publication year", paper["id"])
+                ok = False
         quality = quality_gate.assess(paper["full_text"])
         if not quality.ok:
             LOGGER.error(
@@ -1676,26 +2596,29 @@ def verify_fulltext(
             regimes.get(str(paper["regime_label"]), 0) + 1
         )
 
-    seeds = payload.get("seeds", [])
-    bad_seeds = [
-        seed["identifier"]
-        for seed in seeds
-        if not quality_gate.assess(seed["full_text"]).ok
-    ]
-    if bad_seeds:
-        LOGGER.error("Seeding papers failing the audit: %s", ", ".join(bad_seeds))
+    if expected_seeds is not None and seeded != expected_seeds:
+        LOGGER.error("Expected %d seeding papers, found %d", expected_seeds, seeded)
+        ok = False
+
+    # Seeds must come first so doc ids match the reading order of the corpus.
+    first_harvest = next(
+        (index for index, paper in enumerate(papers) if not paper.get("is_seed")),
+        len(papers),
+    )
+    if any(paper.get("is_seed") for paper in papers[first_harvest:]):
+        LOGGER.error("Seeding papers are not contiguous at the start of the corpus")
         ok = False
 
     LOGGER.info(
-        "Full text: %d papers (+%d seeds), %d unique ids, shortest=%d words",
+        "Full text: %d papers (%d seeds + %d harvested), %d unique ids, "
+        "shortest=%d words",
         len(papers),
-        len(seeds),
+        seeded,
+        len(papers) - seeded,
         len(ids),
         shortest if papers else 0,
     )
-    LOGGER.info(
-        "Bibliographic remnants surviving sanitation: %d", remnants
-    )
+    LOGGER.info("Bibliographic remnants surviving sanitation: %d", remnants)
     for label, count in sorted(regimes.items()):
         LOGGER.info("  %-10s %3d papers", label, count)
     return ok
@@ -1762,23 +2685,22 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     corpus_cfg = config.get("corpus", {})
-    out_path = Path(
-        args.out or corpus_cfg.get("output_path", "data/corpus.json")
-    )
-    target_per_regime = int(corpus_cfg.get("target_per_regime", 40))
+    out_path = Path(args.out or corpus_cfg.get("output_path", "data/corpus.json"))
+    target_per_regime = int(corpus_cfg.get("target_per_regime", 35))
+    target_total = int(corpus_cfg.get("target_total_papers", 120))
+    seed_count = int(corpus_cfg.get("seed_count", 15))
 
     fulltext_cfg = config.get("fulltext", {}) or {}
-    fulltext_path = Path(
-        fulltext_cfg.get("output_path", "data/corpus_fulltext.json")
-    )
+    fulltext_path = Path(fulltext_cfg.get("output_path", "data/corpus_fulltext.json"))
 
     if args.verify_fulltext:
         return (
             0
             if verify_fulltext(
                 fulltext_path,
-                target_per_regime * 3,
+                target_total,
                 QualityGate.from_config(fulltext_cfg),
+                expected_seeds=seed_count,
             )
             else 1
         )
@@ -1795,10 +2717,13 @@ def main(argv: list[str] | None = None) -> int:
                 fulltext_path,
                 len(payload["papers"]),
                 QualityGate.from_config(fulltext_cfg),
+                expected_seeds=int(payload["metadata"]["n_seeds"]),
             )
             else 1
         )
 
+    # Metadata-only harvest (no full text).  Kept for query debugging; the
+    # Seed-First rebuild is --extract-text, which produces both artifacts.
     corpus = harvest_all(config)
     write_corpus(corpus, out_path)
     return 0 if verify_corpus(corpus, target_per_regime) else 1

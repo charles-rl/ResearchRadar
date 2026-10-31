@@ -149,22 +149,16 @@ def test_sublinear_term_frequency_is_applied() -> None:
     )
     document_raw = "aaaaaa aaaaaa"
     settings = TfidfSettings.from_config({"max_features": 5000})
-    plain = TfidfSettings.from_config(
-        {"max_features": 5000, "sublinear_tf": False}
-    )
+    plain = TfidfSettings.from_config({"max_features": 5000, "sublinear_tf": False})
     weighted_sublinear, terms_sublinear, _, _ = build_weighted_matrix(
         ["aaaaaa aaaaaa", "zzzzzz"], settings
     )
-    weighted_plain, _, _, _ = build_weighted_matrix(
-        ["aaaaaa aaaaaa", "zzzzzz"], plain
-    )
+    weighted_plain, _, _, _ = build_weighted_matrix(["aaaaaa aaaaaa", "zzzzzz"], plain)
     index = terms_sublinear.index("aaaaaa")
     sublinear_value = weighted_sublinear[0, index]
     plain_value = weighted_plain[0, index]
     # Both share the same idf, so the ratio isolates the tf transform.
-    assert plain_value / sublinear_value == pytest.approx(
-        2.0 / (1.0 + math.log(2.0))
-    )
+    assert plain_value / sublinear_value == pytest.approx(2.0 / (1.0 + math.log(2.0)))
     assert len(terms) > 0
     assert document_raw
 
@@ -181,7 +175,9 @@ def representation() -> Representation:
 
 def test_l2_rows_have_unit_norm(representation: Representation) -> None:
     norms = np.sqrt(
-        np.asarray(representation.z_l2.multiply(representation.z_l2).sum(axis=1)).ravel()
+        np.asarray(
+            representation.z_l2.multiply(representation.z_l2).sum(axis=1)
+        ).ravel()
     )
     assert np.allclose(norms, 1.0, atol=L2_TOLERANCE)
 
@@ -204,7 +200,12 @@ def test_both_norms_derive_from_one_weighted_matrix(
 
 
 def test_document_ids_follow_corpus_order(representation: Representation) -> None:
-    assert representation.doc_ids == ["2000.00000", "2000.00001", "2000.00002", "2000.00003"]
+    assert representation.doc_ids == [
+        "2000.00000",
+        "2000.00001",
+        "2000.00002",
+        "2000.00003",
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -337,7 +338,9 @@ def test_word_index_document_frequency_counts_documents_not_ngrams() -> None:
     _, terms, _, _ = build_weighted_matrix(texts, TfidfSettings(ngram_range=(4, 5)))
     index = build_word_index(texts, terms, (4, 5))
 
-    by_term = dict(zip(index.family_terms, index.family_document_frequency, strict=True))
+    by_term = dict(
+        zip(index.family_terms, index.family_document_frequency, strict=True)
+    )
     assert family_stem("control") != family_stem("contrast")
     assert by_term["control"] == 1
     assert by_term["contrast"] == 1

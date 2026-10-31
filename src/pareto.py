@@ -96,32 +96,43 @@ def group_archetypes(
 
     Section 4.7 notes that nearby Pareto points usually represent the same broad
     opportunity, while separated regions correspond to qualitatively different
-    discovery mechanisms. Single-linkage grouping at ``radius`` on the chart
-    recovers that structure without imposing an arbitrary cluster count.
+    discovery mechanisms. This is agglomerative **complete-linkage** grouping at
+    ``radius``: two clusters merge only when *every* cross-pair distance is within
+    ``radius``, and the closest merge is taken first.
+
+    Complete linkage is chosen over single linkage deliberately. A single-linkage
+    pass chains along adjacent grid points: the practical front is a connected
+    band of points about one grid step (0.1) apart, so at ``radius = 0.35`` every
+    point reached every other through a chain of short hops and all 64 practical
+    solutions collapsed into a single archetype. Requiring the whole cluster to
+    fit inside ``radius`` keeps the archetype a compact region, which is what
+    Section 4.7 means by "nearby".
     """
     n = points.shape[0]
     if n == 0:
         return []
-    parent = np.arange(n)
-
-    def find(index: int) -> int:
-        while parent[index] != index:
-            parent[index] = parent[parent[index]]
-            index = int(parent[index])
-        return index
 
     distances = np.linalg.norm(points[:, None, :] - points[None, :, :], axis=-1)
-    for i in range(n):
-        for j in range(i + 1, n):
-            if distances[i, j] <= radius:
-                root_i, root_j = find(i), find(j)
-                if root_i != root_j:
-                    parent[root_j] = root_i
+    clusters: list[set[int]] = [{index} for index in range(n)]
 
-    groups: dict[int, list[int]] = {}
-    for index in range(n):
-        groups.setdefault(find(index), []).append(index)
-    return [np.array(members, dtype=np.int64) for members in groups.values()]
+    while len(clusters) > 1:
+        best: tuple[float, int, int] | None = None
+        for left in range(len(clusters)):
+            for right in range(left + 1, len(clusters)):
+                height = float(
+                    distances[
+                        np.ix_(sorted(clusters[left]), sorted(clusters[right]))
+                    ].max()
+                )
+                if height <= radius and (best is None or height < best[0]):
+                    best = (height, left, right)
+        if best is None:
+            break
+        _, left, right = best
+        clusters[left] |= clusters[right]
+        clusters.pop(right)
+
+    return [np.array(sorted(members), dtype=np.int64) for members in clusters]
 
 
 def _describe_point(
@@ -131,7 +142,9 @@ def _describe_point(
     distance: NDArray[np.float64],
     names: tuple[str, ...],
 ) -> dict[str, Any]:
-    scores = {name: float(objectives[index, position]) for position, name in enumerate(names)}
+    scores = {
+        name: float(objectives[index, position]) for position, name in enumerate(names)
+    }
     return {
         "grid_index": int(index),
         "x": float(grid[index, 0]),
@@ -201,9 +214,7 @@ def extract_front(
         entry["rank"] = rank
         ranked.append(entry)
 
-    ranked_indices = np.array(
-        [entry["grid_index"] for entry in ranked], dtype=np.int64
-    )
+    ranked_indices = np.array([entry["grid_index"] for entry in ranked], dtype=np.int64)
     groups = group_archetypes(grid[ranked_indices], archetype_radius)
 
     archetypes: list[dict[str, Any]] = []
@@ -388,9 +399,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if verify_front(paths.pareto_json) else 1
 
     if not paths.grid_npz.is_file():
-        LOGGER.error(
-            "Missing %s. Run 'python -m src.manifold' first.", paths.grid_npz
-        )
+        LOGGER.error("Missing %s. Run 'python -m src.manifold' first.", paths.grid_npz)
         return 1
 
     extract_front(config, paths.grid_npz, paths.pareto_json)
