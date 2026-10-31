@@ -1,0 +1,446 @@
+You are participating in a controlled experiment.  A deterministic 
+pipeline has analyzed a corpus of papers and exported a machine-computed 
+**evidence package** for one location on its knowledge map — the attached 
+`evidence_point_-0.10_-0.50.json`, as produced by `code/make_evidence.py`. 
+No real paper occupies that location.  Your task is to write the 
+**virtual document**: a description of the research that *would* occupy 
+it. 
+
+Evidence terms are **whole words**, deterministically reconstructed from 
+the corpus text (each entry lists its attested `word_forms`).  No 
+fragment decoding is needed. 
+
+The package contains: 
+- `theme_lens_L2` — words indicating the local research theme. 
+- `concentration_lens_L1` — words whose probability mass is locally 
+  concentrated; each carries `df`, the number of corpus documents 
+  containing the word, and, where `df <= 3`, its `source_docs`. 
+- `contributing_documents_top3` — the highest-weighted neighboring 
+  papers (titles and weights). 
+- `mixture_entropy_H`, `effective_contributing_documents`, 
+  `relative_uncertainty_u` — how broad and how well-supported the 
+  location is. 
+
+Rules (binding) 
+1. **Theme from the theme lens.**  Build the consensus research theme 
+   from the L2 words and the contributing documents.  Words appearing 
+   in BOTH lens lists carry the greatest weight.  Titles of 
+   contributing documents may help you interpret the words, but the 
+   description must not be a paraphrase of those titles. 
+2. **Serendipity from the concentration lens, graded by df.**  Words 
+   appearing only in the L1 list are candidates for speculative 
+   additions.  If `df >= 4`: you may present the word as an emergent 
+   shared topic.  If `df <= 3`: you may mention it ONLY as a 
+   single-source hypothesis, explicitly citing its `source_docs` 
+   (e.g. "as explored in only one neighboring study [doc 18]"). 
+   Never present a `df <= 3` word as established regional knowledge. 
+3. **No outside facts.**  Do not assert anything the evidence package 
+   does not support.  Your general knowledge of composites may be used 
+   to connect the evidence into fluent prose, not to add claims absent 
+   from it. 
+4. **Use every listed word or account for it.**  All terms in the 
+   package are corpus words that survived a noise filter; none is a 
+   bibliographic fragment.  If you nevertheless judge a term 
+   unusable, say so explicitly in one line rather than silently 
+   dropping it. 
+5. **Close with the evidence list.**  End your answer with a section 
+   `Evidence used:` listing every word you relied on, each with its 
+   df, plus any term you set aside under Rule 4. 
+
+Deliverables 
+- **Task A**: the virtual document, in English, 200–280 words, 
+  structured as a research abstract (topic, approach, expected 
+  contribution).  Include a one-line caveat reflecting 
+  `relative_uncertainty_u` and `effective_contributing_documents`. 
+- **Task B**: a 45-word summary of the same virtual document. 
+Output Task A, then Task B, then the `Evidence used:` list.  Do not 
+include anything else — no reasoning trace, no extra sections. 
+
+--- attached: evidence_point_-0.10_-0.50.json ---
+{
+  "location": {
+    "x": -0.1,
+    "y": -0.5
+  },
+  "theme_lens_L2": [
+    {
+      "term": "identification",
+      "weight": 0.06708,
+      "df": 43,
+      "word_forms": [
+        "identification"
+      ]
+    },
+    {
+      "term": "learning",
+      "weight": 0.06696,
+      "df": 87,
+      "word_forms": [
+        "learn",
+        "learned",
+        "learning",
+        "learns"
+      ]
+    },
+    {
+      "term": "reinforcement",
+      "weight": 0.05327,
+      "df": 68,
+      "word_forms": [
+        "reinforcement"
+      ]
+    },
+    {
+      "term": "control",
+      "weight": 0.0461,
+      "df": 44,
+      "word_forms": [
+        "control",
+        "controls"
+      ]
+    },
+    {
+      "term": "manipulation",
+      "weight": 0.04088,
+      "df": 54,
+      "word_forms": [
+        "manipulated",
+        "manipulating",
+        "manipulation",
+        "manipulations"
+      ]
+    },
+    {
+      "term": "systems",
+      "weight": 0.03926,
+      "df": 28,
+      "word_forms": [
+        "systems"
+      ]
+    },
+    {
+      "term": "constraints",
+      "weight": 0.03408,
+      "df": 9,
+      "word_forms": [
+        "constraint",
+        "constraints"
+      ]
+    },
+    {
+      "term": "robust",
+      "weight": 0.03279,
+      "df": 18,
+      "word_forms": [
+        "robust"
+      ]
+    },
+    {
+      "term": "linear",
+      "weight": 0.03271,
+      "df": 13,
+      "word_forms": [
+        "linear",
+        "linearity"
+      ]
+    },
+    {
+      "term": "state",
+      "weight": 0.03162,
+      "df": 22,
+      "word_forms": [
+        "state",
+        "states"
+      ]
+    },
+    {
+      "term": "tasks",
+      "weight": 0.03027,
+      "df": 51,
+      "word_forms": [
+        "task",
+        "tasks"
+      ]
+    },
+    {
+      "term": "demonstrations",
+      "weight": 0.03009,
+      "df": 16,
+      "word_forms": [
+        "demonstrated",
+        "demonstrates",
+        "demonstrating",
+        "demonstration",
+        "demonstrations"
+      ]
+    }
+  ],
+  "concentration_lens_L1": [
+    {
+      "term": "contraction-based",
+      "df": 1,
+      "word_forms": [
+        "contraction-based"
+      ],
+      "in_both_lenses": false,
+      "source_docs": [
+        {
+          "doc": "2110.00207v1",
+          "title": "Contraction-Based Methods for Stable Identification and Robust Machine Learning: a Tutorial",
+          "weight": 0.0821
+        }
+      ]
+    },
+    {
+      "term": "behavioural",
+      "df": 1,
+      "word_forms": [
+        "behavioural"
+      ],
+      "in_both_lenses": false,
+      "source_docs": [
+        {
+          "doc": "2110.00207v1",
+          "title": "Contraction-Based Methods for Stable Identification and Robust Machine Learning: a Tutorial",
+          "weight": 0.0821
+        }
+      ]
+    },
+    {
+      "term": "contraction",
+      "df": 1,
+      "word_forms": [
+        "contraction"
+      ],
+      "in_both_lenses": false,
+      "source_docs": [
+        {
+          "doc": "2110.00207v1",
+          "title": "Contraction-Based Methods for Stable Identification and Robust Machine Learning: a Tutorial",
+          "weight": 0.0821
+        }
+      ]
+    },
+    {
+      "term": "armax",
+      "df": 1,
+      "word_forms": [
+        "armax"
+      ],
+      "in_both_lenses": false,
+      "source_docs": [
+        {
+          "doc": "2205.03504v1",
+          "title": "Reinforcement Learning Approach to Estimation in Linear Systems",
+          "weight": 0.0651
+        }
+      ]
+    },
+    {
+      "term": "lqg",
+      "df": 1,
+      "word_forms": [
+        "lqg"
+      ],
+      "in_both_lenses": false,
+      "source_docs": [
+        {
+          "doc": "2205.03504v1",
+          "title": "Reinforcement Learning Approach to Estimation in Linear Systems",
+          "weight": 0.0651
+        }
+      ]
+    },
+    {
+      "term": "underwater",
+      "df": 1,
+      "word_forms": [
+        "underwater"
+      ],
+      "in_both_lenses": false,
+      "source_docs": [
+        {
+          "doc": "2011.12360v1",
+          "title": "A reinforcement learning control approach for underwater manipulation under position and torque constraints",
+          "weight": 0.0588
+        }
+      ]
+    },
+    {
+      "term": "learnt",
+      "df": 2,
+      "word_forms": [
+        "learnt"
+      ],
+      "in_both_lenses": false,
+      "source_docs": [
+        {
+          "doc": "2110.00207v1",
+          "title": "Contraction-Based Methods for Stable Identification and Robust Machine Learning: a Tutorial",
+          "weight": 0.0821
+        },
+        {
+          "doc": "2301.12587v3",
+          "title": "Zero-Shot Transfer of Haptics-Based Object Insertion Policies",
+          "weight": 0.0004
+        }
+      ]
+    },
+    {
+      "term": "guaranteed",
+      "df": 2,
+      "word_forms": [
+        "guaranteed",
+        "guarantees"
+      ],
+      "in_both_lenses": false,
+      "source_docs": [
+        {
+          "doc": "2205.03504v1",
+          "title": "Reinforcement Learning Approach to Estimation in Linear Systems",
+          "weight": 0.0651
+        },
+        {
+          "doc": "2204.08092v1",
+          "title": "The Existence and Uniqueness of Solutions for Kernel-Based System Identification",
+          "weight": 0.0028
+        }
+      ]
+    },
+    {
+      "term": "adapted",
+      "df": 3,
+      "word_forms": [
+        "adapt",
+        "adapted",
+        "adapting",
+        "adaptive",
+        "adapts"
+      ],
+      "in_both_lenses": false,
+      "source_docs": [
+        {
+          "doc": "2110.00207v1",
+          "title": "Contraction-Based Methods for Stable Identification and Robust Machine Learning: a Tutorial",
+          "weight": 0.0821
+        },
+        {
+          "doc": "2512.11609v3",
+          "title": "UniBYD: A Unified Framework for Learning Robotic Manipulation Across Embodiments Beyond Imitation of Human Demonstrations",
+          "weight": 0.0052
+        },
+        {
+          "doc": "2606.31101v1",
+          "title": "Efficient Sim-to-Real Transfer of World-Action Models from Synthetic Priors",
+          "weight": 0.0013
+        }
+      ]
+    },
+    {
+      "term": "blending",
+      "df": 2,
+      "word_forms": [
+        "blending",
+        "blends"
+      ],
+      "in_both_lenses": false,
+      "source_docs": [
+        {
+          "doc": "2205.09836v1",
+          "title": "Concurrent Policy Blending and System Identification for Generalized Assistive Control",
+          "weight": 0.0559
+        },
+        {
+          "doc": "2506.09366v1",
+          "title": "SkillBlender: Towards Versatile Humanoid Whole-Body Loco-Manipulation via Skill Blending",
+          "weight": 0.0034
+        }
+      ]
+    },
+    {
+      "term": "manipulator",
+      "df": 3,
+      "word_forms": [
+        "manipulator",
+        "manipulators"
+      ],
+      "in_both_lenses": false,
+      "source_docs": [
+        {
+          "doc": "2011.12360v1",
+          "title": "A reinforcement learning control approach for underwater manipulation under position and torque constraints",
+          "weight": 0.0588
+        },
+        {
+          "doc": "2511.18878v1",
+          "title": "Accelerating Reinforcement Learning via Error-Related Human Brain Signals",
+          "weight": 0.042
+        },
+        {
+          "doc": "2607.00534v1",
+          "title": "Learning from Demonstration via Spatiotemporal Tubes for Unknown Euler-Lagrange Systems",
+          "weight": 0.0155
+        }
+      ]
+    },
+    {
+      "term": "stiffness",
+      "df": 2,
+      "word_forms": [
+        "stiffness"
+      ],
+      "in_both_lenses": false,
+      "source_docs": [
+        {
+          "doc": "1912.09093v3",
+          "title": "Identification of abrupt stiffness changes of structures with tuned mass dampers under sudden events",
+          "weight": 0.0473
+        },
+        {
+          "doc": "2102.08442v2",
+          "title": "SCAPE: Learning Stiffness Control from Augmented Position Control Experiences",
+          "weight": 0.0412
+        }
+      ]
+    }
+  ],
+  "contributing_documents_top3": [
+    {
+      "doc": "2110.00207v1",
+      "title": "Contraction-Based Methods for Stable Identification and Robust Machine Learning: a Tutorial",
+      "authors": [
+        "Ian R. Manchester",
+        "Max Revay",
+        "Ruigang Wang"
+      ],
+      "year": 2021,
+      "regime": "SysID",
+      "weight": 0.0821
+    },
+    {
+      "doc": "2205.03504v1",
+      "title": "Reinforcement Learning Approach to Estimation in Linear Systems",
+      "authors": [
+        "Minyue Fu"
+      ],
+      "year": 2022,
+      "regime": "SysID",
+      "weight": 0.0651
+    },
+    {
+      "doc": "2011.12360v1",
+      "title": "A reinforcement learning control approach for underwater manipulation under position and torque constraints",
+      "authors": [
+        "Ignacio Carlucho",
+        "Mariano De Paula",
+        "Gerardo G. Acosta"
+      ],
+      "year": 2020,
+      "regime": "RL",
+      "weight": 0.0588
+    }
+  ],
+  "mixture_entropy_H": 0.7713,
+  "effective_contributing_documents": 29.83,
+  "relative_uncertainty_u": 0.113934
+}

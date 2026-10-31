@@ -95,9 +95,13 @@ models:
 
 manifold:
   grid_size: 21           # 21x21 = 441 evaluation points (Obayashi et al. Sec. 5.5)
+  grid_output: "data/manifold_grid.npz"
   bounds: [-1.0, 1.0]     # Chart Omega = [-1, 1]^2 (Obayashi et al. Sec. 2.1)
   sph_h: 0.25             # Kernel smoothing parameter
   nearest_k: 8            # Adaptive neighborhood scale (Obayashi et al. Sec. 5.4)
+  perimeter_anchors: 8    # + 1 central anchor = 9 gauge-fixing anchors (Sec. 5.2)
+  norm_percentiles: [10, 90]     # N+ / N- normalization percentiles (Eqs. 9-10)
+  use_empirical_quantiles: true  # recompute W() quantiles from this corpus's d_nn
   q_whitespace:           # Empirical quantiles for band-pass W(x) (Eq. 12, Eq. 28)
     q20: 0.0517
     q60: 0.1000
@@ -106,9 +110,11 @@ manifold:
 
 pareto:
   # Practical Pareto constraint: drop zero-white-space edge artifacts
+  output_path: "data/pareto_solutions.json"
   min_whitespace: 0.0
   objectives: ["P_boundary", "W", "G", "S"]
   ideal_point: [1.0, 1.0, 1.0, 1.0]
+  archetype_radius: 0.35   # chart-space radius grouping front points into archetypes
 
 output:
   html_path: "output/radar_map.html"

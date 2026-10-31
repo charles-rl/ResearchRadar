@@ -136,20 +136,52 @@ by different models. The cache keys on `model`, so switching forces a re-embed.
 
 - **Regime B is query-starved.** `abs:"domain randomization" AND
   abs:"sim-to-real" AND cat:cs.RO` has only ~140 total hits, so the 40 kept
-  papers are the top 40 by relevance with no headroom for review-rejection. Still
-  an open decision whether to relax `AND` to `OR`.
+  papers are the top 40 by relevance with no headroom for review-rejection.
+  Decided to keep the query as-is: the corpus is balanced at 40 per regime and
+  larger than the 99 papers used in Obayashi et al. (2026).
 - **Review filter is strict by design.** It inspects the first two sentences of
   the abstract, so a genuine research paper whose abstract opens with "this
   review" is rejected. Accepted as deliberately conservative per
   Obayashi et al. (2026) §5.1.
 - `docs/papers/` and `models/` are git-ignored; a fresh clone must supply its own
   PDFs and weights.
+- **Novelty is corpus-relative.** The Pareto gaps are gaps in a 120-paper arXiv
+  sample, not proof that the topics are unexplored in the wider literature.
+- **Abstracts, not full text.** Obayashi et al. (2026) use full-text character
+  n-grams; this pipeline only has titles and abstracts, so term statistics are not
+  numerically comparable to the paper's.
+
+## Traps found while building the analysis stages
+
+- **`np.savez` turns scalars into length-1 arrays.** `float(archive["stress"])`
+  raises `TypeError: only 0-dimensional arrays can be converted to Python
+  scalars`. `src/report.py::archive_scalar` ravels first.
+- **Two saved keys collided as `h_global`.** The SPH bandwidth scalar and the
+  entropy field were both written under `h_global`, so the scalar silently
+  replaced the array and every entropy read returned the bandwidth. They are now
+  `sph_h`, `h_global_entropy`, and `h_adaptive_entropy`.
+- **Pareto dominance broadcast is easy to transpose.** Writing
+  `objectives[None, :, :] >= objectives[:, None, :]` indexes
+  `[victim, dominator]`, so `.any(axis=0)` answers "dominates something" instead
+  of "is dominated" and flags 439 of 441 points. The correct order is
+  `dominator = objectives[:, None, :]`, `victim = objectives[None, :, :]`.
+  `src.pareto --verify-only` re-checks the front with a brute-force loop.
+- **GPR hyperparameter optimization runs to the bound.** Letting scikit-learn
+  fit the RBF length scale drove it to its lower bound and produced a degenerate
+  `R = 1.0` everywhere. The kernel is now pinned to the median inter-document
+  distance with all bounds `"fixed"`, which is deterministic and honest.
+- **The Appendix A.1 template's last line ends in a space.** Calling `.rstrip()`
+  on the extracted text made the rendered prompt differ from the paper and the
+  verbatim check failed. The template is now copied byte-for-byte.
 
 ## Offline verification
 
-Both stages verify without network access, and exit non-zero on failure:
+All five stages verify without network access and exit non-zero on failure:
 
 ```bash
-.venv/bin/python -m src.harvest --verify-only   # 40/40/40, unique ids + titles
-.venv/bin/python -m src.embed   --verify-only   # shape, finiteness, unit norm
+.venv/bin/python -m src.harvest  --verify-only   # 40/40/40, unique ids + titles
+.venv/bin/python -m src.embed    --verify-only   # shape, finiteness, unit norm
+.venv/bin/python -m src.manifold --verify-only   # grid, anchors, objective ranges
+.venv/bin/python -m src.pareto   --verify-only   # dominance, ranking, archetypes
+.venv/bin/python -m src.report   --verify-only   # artifacts, verbatim prompt
 ```

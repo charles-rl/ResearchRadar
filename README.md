@@ -6,7 +6,8 @@ projects the embedding manifold into a 2-D chart that is scored on boundary
 pressure, whitespace, knowledge-gradient alignment, and structure.
 
 Implemented so far: **Phase 1** (environment), **Phase 2** (harvest),
-**Phase 3** (embeddings).
+**Phase 3** (embeddings), **Phase 4** (manifold and discovery fields),
+**Phase 5** (Pareto search), **Phase 6** (report and LLM prompt).
 
 ## Regimes
 
@@ -27,13 +28,21 @@ PIP_CONFIG_FILE=/dev/null .venv/bin/pip install --isolated \
 
 .venv/bin/python -m src.harvest      # -> data/corpus.json   (120 papers)
 .venv/bin/python -m src.embed        # -> data/embeddings.npy (120, 2560)
+.venv/bin/python -m src.manifold     # -> data/manifold_grid.npz  (441-point grid)
+.venv/bin/python -m src.pareto       # -> data/pareto_solutions.json
+.venv/bin/python -m src.report       # -> output/radar_map.html
+                                     #    output/RADAR_REPORT.md
+                                     #    output/KMO_PROMPT_TOP1.txt
 ```
 
-Both modules support offline re-verification:
+Every module supports offline re-verification:
 
 ```bash
-.venv/bin/python -m src.harvest --verify-only
-.venv/bin/python -m src.embed   --verify-only
+.venv/bin/python -m src.harvest  --verify-only
+.venv/bin/python -m src.embed    --verify-only
+.venv/bin/python -m src.manifold --verify-only
+.venv/bin/python -m src.pareto   --verify-only
+.venv/bin/python -m src.report   --verify-only
 ```
 
 ## Why the pip flags
@@ -107,13 +116,40 @@ from `models/F2LLM-*` with the recipe above only if you need to re-register.
   Re-running on an unchanged corpus makes zero HTTP calls; editing one paper
   re-embeds exactly one row.
 
+## Manifold, Pareto front, and report
+
+* **Projection.** Classical MDS, then constrained stress minimization with 9
+  gauge-fixing anchors (8 perimeter + 1 central) onto `[-1, 1]^2`.
+  Final metric stress 204.69, Spearman(distance) 0.8658.
+* **Grid.** 21x21 = 441 candidates, scored on `P_boundary`, `W`, `G`, and `S`.
+* **White-space window.** The `q20/q60/q85/q98` band-pass thresholds are
+  recomputed on this corpus's own nearest-document distances
+  (`manifold.use_empirical_quantiles: true`). The paper's values are for its
+  aerodynamic corpus at a different map scale and are kept only as reference.
+* **Pareto search.** Exact pairwise dominance, no evolutionary optimizer. 45
+  non-dominated points, 33 practical after the `W(x) > 0` filter, grouped into
+  3 discovery archetypes at `archetype_radius: 0.35`.
+* **Reliability `R`** is computed and reported but is *not* a Pareto objective:
+  maximizing low uncertainty rewards already-dense regions.
+* **The prompt.** `docs/kmo_prompt_template_A1.txt` holds the Appendix A.1 text
+  extracted verbatim from the paper. `src/report.py` only substitutes the
+  placeholder file name, and `--verify-only` compares the rendered prompt to the
+  template line by line, so the wording cannot drift.
+
 ## Layout
 
 ```text
 config.yaml                       queries, limits, model/analysis parameters
 docs/implementation-notes.md      non-obvious environment traps and decisions
+docs/kmo_prompt_template_A1.txt   verbatim Appendix A.1 prompt template
 src/harvest.py                    arXiv harvesting, review filtering, cleanup
 src/embed.py                      Ollama F2LLM embedding with MD5 caching
+src/common.py                     config loading, path resolution, logging
+src/manifold.py                   MDS, discovery grid, the four KMO objectives
+src/pareto.py                     exact dominance, practical front, archetypes
+src/report.py                     Plotly map, Markdown report, LLM prompt
 data/corpus.json                  the 120-paper corpus (committed)
 data/embeddings.npy               derived embedding matrix (git-ignored)
+data/manifold_grid.npz            grid coordinates and objective matrix
+output/                           rendered artifacts (git-ignored)
 ```
