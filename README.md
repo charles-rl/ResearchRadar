@@ -81,7 +81,7 @@ import gguf; r = gguf.GGUFReader("models/gguf/F2LLM-4B-bf16.gguf")
 print(r.fields["qwen3.pooling_type"].contents())'   # 3 == LAST
 ```
 
-| Model | Ollama tag | Dimensions | GGUF size |
+| Model | Ollama tag | Dimensions | Weights size |
 | --- | --- | --- | --- |
 | F2LLM-4B | `codefuse-ai/F2LLM-4B` | 2560 | 7.6 GB |
 | F2LLM-0.6B | `codefuse-ai/F2LLM-0.6B` | 1024 | 1.2 GB |
@@ -89,6 +89,14 @@ print(r.fields["qwen3.pooling_type"].contents())'   # 3 == LAST
 The 4B model is the default. Switch to the 0.6B model with
 `--model codefuse-ai/F2LLM-0.6B`, or by editing `ollama.fallback_model` if VRAM
 is tight.
+
+The two models are different, not copies of each other: they produce 2560- and
+1024-dimensional vectors. Matrices built by different models are not comparable,
+so the embedding cache keys on the model tag and switching forces a re-embed.
+
+`models/gguf/` is deleted once registration succeeds. `ollama create` copies the
+GGUF into its own blob store, so the intermediates are redundant; rebuild them
+from `models/F2LLM-*` with the recipe above only if you need to re-register.
 
 ## Embedding pipeline
 
@@ -102,9 +110,10 @@ is tight.
 ## Layout
 
 ```text
-config.yaml              queries, limits, model and analysis parameters
-src/harvest.py           arXiv harvesting, review filtering, abstract cleanup
-src/embed.py             Ollama F2LLM embedding with MD5 caching
-data/corpus.json         the 120-paper corpus (committed)
-data/embeddings.npy      derived embedding matrix (git-ignored)
+config.yaml                       queries, limits, model/analysis parameters
+docs/implementation-notes.md      non-obvious environment traps and decisions
+src/harvest.py                    arXiv harvesting, review filtering, cleanup
+src/embed.py                      Ollama F2LLM embedding with MD5 caching
+data/corpus.json                  the 120-paper corpus (committed)
+data/embeddings.npy               derived embedding matrix (git-ignored)
 ```
