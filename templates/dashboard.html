@@ -38,31 +38,244 @@
         integrity="sha384-hK2uiaqTSh/v1VqRxmuMQL4xmt5n0DdyBCOItx2fAs7Wv+WC8Tu0yDW1j12JooyM"
         crossorigin="anonymous"></script>
 <style>
-  html { color-scheme: dark; }
-  body { background-color: #0b0f19; }
+  /* ── tokens ─────────────────────────────────────────────────────────── */
+  :root {
+    --bg: #080b12;
+    --line: rgba(148, 163, 184, 0.10);
+    --line-hi: rgba(148, 163, 184, 0.20);
+    --muted: #94a3b8;
+    --faint: #64748b;
+    --dim: #55637a;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { color-scheme: dark; -webkit-text-size-adjust: 100%; }
+  body {
+    background:
+      radial-gradient(1100px 520px at 12% -8%, rgba(34, 211, 238, 0.055), transparent 62%),
+      radial-gradient(900px 460px at 102% -4%, rgba(139, 92, 246, 0.05), transparent 58%),
+      var(--bg);
+  }
+
+  #drawer-scroll { scrollbar-gutter: stable; }
+
+  /* ── scrollbars, both engines ───────────────────────────────────────── */
+  * { scrollbar-width: thin; scrollbar-color: #2b3648 transparent; }
   ::-webkit-scrollbar { width: 9px; height: 9px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #334155; border-radius: 9999px; }
-  ::-webkit-scrollbar-thumb:hover { background: #475569; }
-  .layer-btn { transition: background-color .15s, border-color .15s, color .15s, box-shadow .15s; }
-  .layer-btn[aria-pressed="true"] { background-color: rgba(255,255,255,.09); box-shadow: inset 0 0 0 1px rgba(255,255,255,.28); }
-  .arc-A { color: #22d3ee; }
-  .arc-B { color: #fbbf24; }
-  .arc-C { color: #c084fc; }
-  .chip-dot { width: 8px; height: 8px; border-radius: 9999px; display: inline-block; }
-  .weight-bar { height: 3px; border-radius: 9999px; background: rgba(148,163,184,.22); overflow: hidden; }
-  .weight-bar > i { display: block; height: 100%; border-radius: 9999px; background: linear-gradient(90deg,#22d3ee,#34d399); }
-  .mixture-bar { height: 6px; border-radius: 9999px; overflow: hidden; display: flex; background: rgba(148,163,184,.15); }
-  .mixture-bar > i { display: block; height: 100%; }
-  #drawer-scroll { scrollbar-gutter: stable; }
+  ::-webkit-scrollbar-thumb {
+    background: #2b3648; border-radius: 9999px;
+    border: 2px solid transparent; background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: #3e4c63; background-clip: content-box; }
+
+  /* ── accessibility ──────────────────────────────────────────────────── */
+  :where(button, select, a, input, [tabindex]):focus-visible {
+    outline: 2px solid rgba(34, 211, 238, 0.6); outline-offset: 2px; border-radius: 8px;
+  }
+  kbd {
+    padding: 1px 4px; border-radius: 4px; border: 1px solid rgba(148, 163, 184, 0.16);
+    background: rgba(148, 163, 184, 0.10); color: #94a3b8; font-size: 9px; line-height: 1.5;
+  }
+
+  /* ── header metric strip ────────────────────────────────────────────── */
+  .metric {
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 4px 11px; line-height: 1.25; min-width: 0;
+  }
+  .metric + .metric { border-left: 1px solid var(--line); }
+  #metric-chips { display: none; }
+  @media (min-width: 640px) { #metric-chips { display: flex; align-items: stretch; } }
+  .metric > b {
+    font-family: var(--mono); font-size: 11.5px; font-weight: 500;
+    color: #e2e8f0; letter-spacing: -0.01em; white-space: nowrap;
+  }
+  .metric > i {
+    font-style: normal; font-size: 8.5px; font-weight: 600;
+    letter-spacing: 0.11em; text-transform: uppercase; color: var(--dim);
+  }
+
+  /* ── segmented layer control ────────────────────────────────────────── */
+  .seg {
+    display: inline-flex; align-items: center; gap: 2px; padding: 3px;
+    border-radius: 11px; border: 1px solid var(--line); background: rgba(3, 7, 14, 0.55);
+  }
+  .seg > button {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 10px; border-radius: 8px; border: 1px solid transparent;
+    font-size: 11.5px; font-weight: 500; color: var(--muted); white-space: nowrap;
+    transition: background-color .16s ease, color .16s ease, box-shadow .16s ease;
+  }
+  .seg > button:hover { color: #f8fafc; background: rgba(255, 255, 255, 0.045); }
+  .seg > button[aria-pressed="true"] {
+    color: #fff; background: rgba(255, 255, 255, 0.09);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15), 0 1px 8px rgba(0, 0, 0, 0.40);
+  }
+  .seg sub { font-size: 7.5px; line-height: 0; }
+
+  .field-legend { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .field-legend > .nm { font-family: var(--mono); font-size: 10px; color: var(--muted); white-space: nowrap; }
+  .field-legend > .bar {
+    width: 76px; height: 5px; border-radius: 9999px;
+    border: 1px solid var(--line); flex: none;
+  }
+  .field-legend > .rg { font-family: var(--mono); font-size: 9.5px; color: var(--dim); white-space: nowrap; }
+
+  .chip-dot { width: 7px; height: 7px; border-radius: 9999px; display: inline-block; flex: none; }
+
+  /* ── drawer chrome ──────────────────────────────────────────────────── */
+  .icon-btn {
+    display: inline-grid; place-items: center; height: 28px; width: 28px;
+    border-radius: 8px; border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.02); color: var(--muted);
+    transition: color .16s ease, border-color .16s ease, background-color .16s ease;
+  }
+  .icon-btn:hover { color: #fff; border-color: var(--line-hi); background: rgba(255, 255, 255, 0.06); }
+  .icon-btn:active { transform: translateY(0.5px); }
+
+  .gap-select {
+    min-width: 0; flex: 1 1 auto; height: 28px; padding: 0 6px;
+    border-radius: 8px; border: 1px solid var(--line);
+    background: rgba(3, 7, 14, 0.7); color: #cbd5e1;
+    font-family: var(--mono); font-size: 10.5px; outline: none;
+  }
+  .gap-select:hover { border-color: var(--line-hi); }
+
+  .radar-panel {
+    border: 1px solid rgba(148, 163, 184, 0.07); border-radius: 10px;
+    background: rgba(255, 255, 255, 0.015);
+  }
+
+  .sh {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 9.5px; font-weight: 600; letter-spacing: 0.13em;
+    text-transform: uppercase; color: var(--faint);
+  }
+
+  .badge {
+    display: inline-block; padding: 1px 6px; border-radius: 5px;
+    font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.02em;
+    white-space: nowrap; border: 1px solid var(--line); color: var(--muted);
+    background: rgba(255, 255, 255, 0.03);
+  }
+  .badge.arc-A { color: #67e8f9; border-color: rgba(34, 211, 238, 0.32); background: rgba(34, 211, 238, 0.10); }
+  .badge.arc-B { color: #fcd34d; border-color: rgba(251, 191, 36, 0.32); background: rgba(251, 191, 36, 0.10); }
+  .badge.arc-C { color: #d8b4fe; border-color: rgba(192, 132, 252, 0.32); background: rgba(192, 132, 252, 0.10); }
+  .badge.warn { color: #fcd34d; border-color: rgba(251, 191, 36, 0.30); background: rgba(251, 191, 36, 0.10); }
+
+  /* ── stat tiles ─────────────────────────────────────────────────────── */
+  .stat {
+    border: 1px solid var(--line); border-radius: 9px;
+    background: rgba(255, 255, 255, 0.018); padding: 6px 8px; min-width: 0;
+  }
+  .stat > span {
+    display: block; font-size: 8.5px; font-weight: 600; letter-spacing: 0.11em;
+    text-transform: uppercase; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .stat > em { display: block; font-style: normal; font-size: 8px; color: var(--dim); }
+  .stat > b {
+    display: block; margin-top: 1px; font-family: var(--mono); font-size: 12.5px;
+    font-weight: 500; color: #e2e8f0; letter-spacing: -0.01em;
+  }
+
+  /* ── regime mixture ─────────────────────────────────────────────────── */
+  .mix-bar {
+    height: 7px; border-radius: 9999px; overflow: hidden; display: flex;
+    background: rgba(148, 163, 184, 0.12);
+  }
+  .mix-bar > i { display: block; height: 100%; }
+  .mix-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center; gap: 8px; padding: 2px 0;
+  }
+  .mix-row > .nm { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #cbd5e1; }
+  .mix-row > .vl { font-family: var(--mono); font-size: 10.5px; color: #94a3b8; }
+  .mix-row > .ad { font-family: var(--mono); font-size: 9.5px; color: var(--dim); min-width: 3.6em; text-align: right; }
+
+  /* ── anchor papers ──────────────────────────────────────────────────── */
+  .anchor {
+    display: block; text-decoration: none; border: 1px solid var(--line); border-radius: 11px;
+    background: rgba(255, 255, 255, 0.017); padding: 8px 9px;
+    transition: border-color .16s ease, background-color .16s ease, transform .16s ease;
+  }
+  .anchor:hover { border-color: var(--line-hi); background: rgba(255, 255, 255, 0.05); transform: translateY(-1px); }
+  .anchor:active { transform: none; }
+  .anchor > .idx {
+    display: grid; place-items: center; height: 17px; width: 17px; border-radius: 5px;
+    font-family: var(--mono); font-size: 9px; color: var(--dim);
+    background: rgba(148, 163, 184, 0.10); flex: none;
+  }
+  .anchor .ttl {
+    font-size: 12px; line-height: 1.35; color: #e8eef7;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .anchor .meta { margin-top: 2px; font-size: 10px; color: var(--dim); }
+  .anchor .wbar { height: 3px; border-radius: 9999px; background: rgba(148, 163, 184, 0.16); overflow: hidden; }
+  .anchor .wbar > i {
+    display: block; height: 100%; border-radius: 9999px;
+    background: linear-gradient(90deg, #0e7490, #22d3ee);
+  }
+  .anchor .wv { font-family: var(--mono); font-size: 9.5px; color: #94a3b8; flex: none; }
+
+  /* ── lexical lenses ─────────────────────────────────────────────────── */
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px;
+    border-radius: 6px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.03);
+    font-family: var(--mono); font-size: 10px; color: #cbd5e1;
+  }
+  .chip.both { border-color: rgba(34, 211, 238, 0.38); background: rgba(34, 211, 238, 0.12); color: #a5f3fc; }
+  .chip > .n { font-size: 8.5px; color: var(--dim); }
+
+  .lens { width: 100%; border-collapse: collapse; }
+  .lens tr + tr { border-top: 1px solid rgba(148, 163, 184, 0.07); }
+  .lens td { padding: 3px 0; vertical-align: top; }
+  .lens .term { font-family: var(--mono); font-size: 11px; color: #e2e8f0; padding-right: 8px; }
+  .lens .df {
+    display: inline-block; font-family: var(--mono); font-size: 9px;
+    padding: 0 4px; border-radius: 4px; color: #94a3b8; background: rgba(148, 163, 184, 0.10);
+    white-space: nowrap;
+  }
+  .lens .src { font-size: 10px; color: var(--faint); }
+  .lens .src a { color: #67e8f9; text-decoration: none; }
+  .lens .src a:hover { text-decoration: underline; }
+  .lens .src b { font-family: var(--mono); font-weight: 400; color: #94a3b8; }
+
+  .empty { padding: 5px 1px; font-size: 10px; line-height: 1.5; color: var(--dim); }
+
+  /* ── prompt block ───────────────────────────────────────────────────── */
+  .prompt {
+    max-height: min(340px, 44vh); overflow: auto; overscroll-behavior: contain;
+    margin: 0; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--line);
+    background: rgba(3, 7, 14, 0.72); font-family: var(--mono);
+    font-size: 10.5px; line-height: 1.6; color: #b6c2d2;
+    white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2;
+  }
+
+  /* ── motion ─────────────────────────────────────────────────────────── */
   .fade-in { animation: fade .22s ease-out; }
   @keyframes fade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
-  .lens-table td { padding: 2px 0; vertical-align: top; }
-  .prompt-pre { tab-size: 2; }
-  .clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 22px; z-index: 60;
+    display: flex; align-items: center; gap: 7px; padding: 8px 14px;
+    border-radius: 10px; border: 1px solid rgba(52, 211, 153, 0.30);
+    background: rgba(6, 44, 34, 0.94); color: #a7f3d0; font-size: 11.5px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.50);
+    opacity: 0; transform: translate(-50%, 10px); pointer-events: none;
+    transition: opacity .2s ease, transform .2s ease;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fade-in { animation: none; }
+    .toast, .anchor, .seg > button, .icon-btn { transition: none; }
+    .anchor:hover, .anchor:active { transform: none; }
+  }
 </style>
 </head>
-<body class="min-h-screen bg-ink font-sans text-slate-200 antialiased lg:flex lg:h-screen lg:flex-col lg:overflow-hidden">
+<body class="min-h-screen font-sans text-slate-200 antialiased lg:flex lg:h-screen lg:flex-col lg:overflow-hidden">
 
 <script id="radar-data" type="application/json">__RADAR_DATA__</script>
 
@@ -71,157 +284,189 @@
 </noscript>
 
 <!-- ───────────────────────────── header ───────────────────────────── -->
-<header class="z-20 flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-b border-white/5 bg-panelDeep/70 px-4 py-2.5 backdrop-blur sm:px-5">
-  <div class="flex items-center gap-3">
-    <div class="grid h-9 w-9 place-items-center rounded-lg border border-cyan-400/25 bg-cyan-400/10">
-      <i data-lucide="radar" class="h-[18px] w-[18px] text-cyan-300"></i>
-    </div>
-    <div class="leading-tight">
-      <h1 class="text-[15px] font-semibold tracking-tight text-white">ResearchRadar</h1>
-      <p class="text-[10.5px] uppercase tracking-[0.14em] text-slate-500">Knowledge Manifold Operations</p>
+<header class="z-20 flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-white/[0.06] bg-[#0a0f18]/80 px-4 py-2.5 backdrop-blur-md sm:px-5">
+  <div class="flex items-center gap-2.5">
+    <span class="grid h-8 w-8 place-items-center rounded-[10px] border border-cyan-400/25 bg-cyan-400/[0.08]">
+      <i data-lucide="radar" class="h-4 w-4 text-cyan-300"></i>
+    </span>
+    <div class="leading-[1.15]">
+      <h1 class="text-[13.5px] font-semibold tracking-[-0.01em] text-white">ResearchRadar</h1>
+      <p class="text-[9.5px] font-medium uppercase tracking-[0.16em] text-slate-500">Knowledge Manifold</p>
     </div>
   </div>
 
-  <div id="metric-chips" class="flex flex-wrap items-center gap-1.5"></div>
+  <div id="metric-chips" class="hidden overflow-hidden rounded-lg border border-white/[0.07] bg-white/[0.02] sm:flex"></div>
 
-  <div class="ml-auto flex items-center gap-1.5 text-[10.5px] text-slate-500">
-    <i data-lucide="mouse-pointer-click" class="h-3.5 w-3.5"></i>
-    <span class="hidden sm:inline">Click a star to inspect its evidence package</span>
-    <span class="sm:hidden">Tap a star to inspect</span>
+  <div class="ml-auto flex items-center gap-2">
+    <span class="hidden items-center gap-1.5 rounded-md border border-white/[0.07] bg-white/[0.02] px-2 py-1 font-mono text-[9.5px] text-slate-500 lg:flex">
+      <kbd>←</kbd><kbd>→</kbd> gap
+      <span class="text-slate-600">·</span>
+      <kbd>1</kbd>–<kbd>5</kbd> layer
+    </span>
   </div>
 </header>
 
 <main class="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_clamp(360px,32vw,470px)]">
 
   <!-- ──────────────────────── left: manifold ──────────────────────── -->
-  <section class="relative flex min-h-[62vh] flex-col lg:min-h-0">
-    <div class="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-white/5 bg-ink/60 px-3 py-2">
-      <span class="mr-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Field layer</span>
-      <button class="layer-btn rounded-md border border-white/10 px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:text-white" data-layer="none" aria-pressed="true">
-        Papers + gaps
-      </button>
-      <button class="layer-btn rounded-md border border-white/10 px-2.5 py-1 font-mono text-[11px] text-cyan-300 hover:text-white" data-layer="P_boundary" aria-pressed="false">
-        P<sub class="text-[8px]">boundary</sub>
-      </button>
-      <button class="layer-btn rounded-md border border-white/10 px-2.5 py-1 font-mono text-[11px] text-amber-300 hover:text-white" data-layer="W" aria-pressed="false">W</button>
-      <button class="layer-btn rounded-md border border-white/10 px-2.5 py-1 font-mono text-[11px] text-emerald-300 hover:text-white" data-layer="G" aria-pressed="false">G</button>
-      <button class="layer-btn rounded-md border border-white/10 px-2.5 py-1 font-mono text-[11px] text-violet-300 hover:text-white" data-layer="S" aria-pressed="false">S</button>
-      <span id="layer-note" class="ml-1 hidden text-[10.5px] text-slate-500 md:inline"></span>
+  <section class="relative flex min-h-[56vh] flex-col lg:min-h-0">
+    <div class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-white/[0.06] bg-[#080b12]/70 px-3 py-2">
+      <div class="seg" role="group" aria-label="Background field layer">
+        <button data-layer="none" aria-pressed="true" title="Hide the field overlay">
+          <i data-lucide="scatter-chart" class="h-3 w-3"></i>Papers
+        </button>
+        <button data-layer="P_boundary" aria-pressed="false" class="font-mono" title="Persistent boundary: harmonic mean of the global and adaptive boundary strengths">P<sub>boundary</sub></button>
+        <button data-layer="W" aria-pressed="false" class="font-mono" title="Band-pass white-space novelty">W</button>
+        <button data-layer="G" aria-pressed="false" class="font-mono" title="Semantic gradient norm">G</button>
+        <button data-layer="S" aria-pressed="false" class="font-mono" title="Evidential support">S</button>
+      </div>
+
+      <div id="layer-note" class="hidden min-w-0 items-center md:flex"></div>
+
+      <div class="ml-auto hidden flex-wrap items-center gap-x-2.5 gap-y-1 text-[9.5px] text-slate-500 sm:flex">
+        <span class="flex items-center gap-1"><span class="chip-dot" style="background:#22d3ee"></span>SysID</span>
+        <span class="flex items-center gap-1"><span class="chip-dot" style="background:#fbbf24"></span>Sim2Real</span>
+        <span class="flex items-center gap-1"><span class="chip-dot" style="background:#34d399"></span>RL</span>
+        <span class="h-3 w-px bg-white/10"></span>
+        <span class="flex items-center gap-1"><span class="text-[11px] leading-none text-pink-300">★</span>practical gap</span>
+        <span class="flex items-center gap-1"><span class="text-[11px] leading-none text-amber-300">★</span>#1 compromise</span>
+      </div>
     </div>
 
     <div class="relative min-h-0 flex-1">
       <div id="manifold" class="absolute inset-0"></div>
-      <div class="pointer-events-none absolute bottom-2 left-3 font-mono text-[10px] text-slate-600">
-        Ω = [−1, 1]² · 21×21 candidates · 120 documents
+      <div class="pointer-events-none absolute right-3 top-3 rounded-md border border-white/[0.06] bg-[#080b12]/70 px-2 py-1 font-mono text-[9.5px] text-slate-500 backdrop-blur-sm">
+        Ω = [−1, 1]² · 21×21 · 120 docs
       </div>
     </div>
   </section>
 
   <!-- ───────────────────── right: evidence drawer ───────────────────── -->
-  <aside class="flex min-h-0 flex-col border-t border-white/5 bg-panel/40 lg:border-l lg:border-t-0">
-    <div class="flex shrink-0 items-center gap-2 border-b border-white/5 px-3 py-2">
-      <button id="prev-btn" class="rounded-md border border-white/10 p-1 text-slate-400 hover:text-white" title="Previous gap (left arrow)" aria-label="Previous gap">
+  <aside class="flex min-h-0 flex-col border-t border-white/[0.06] bg-[#0a0f18]/60 lg:border-l lg:border-t-0">
+    <div class="flex shrink-0 items-center gap-1.5 border-b border-white/[0.06] bg-[#0a0f18]/70 px-2.5 py-2">
+      <button id="prev-btn" class="icon-btn" title="Previous gap (left arrow)" aria-label="Previous gap">
         <i data-lucide="chevron-left" class="h-4 w-4"></i>
       </button>
-      <button id="next-btn" class="rounded-md border border-white/10 p-1 text-slate-400 hover:text-white" title="Next gap (right arrow)" aria-label="Next gap">
+      <button id="next-btn" class="icon-btn" title="Next gap (right arrow)" aria-label="Next gap">
         <i data-lucide="chevron-right" class="h-4 w-4"></i>
       </button>
-      <select id="gap-select" class="min-w-0 flex-1 rounded-md border border-white/10 bg-panelDeep px-2 py-1 font-mono text-[11px] text-slate-300 outline-none focus:border-cyan-400/50" aria-label="Select a Pareto gap"></select>
-      <span id="gap-arch" class="shrink-0 rounded border border-white/10 px-1.5 py-0.5 font-mono text-[10px] text-slate-400"></span>
+      <select id="gap-select" class="gap-select" aria-label="Select a Pareto gap"></select>
     </div>
 
-    <div id="drawer-scroll" class="min-h-0 flex-1 overflow-y-auto">
+    <div id="drawer-scroll" class="min-h-0 flex-1 lg:overflow-y-auto">
 
-      <div class="border-b border-white/5 px-4 pb-3 pt-3">
-        <div class="flex items-baseline justify-between gap-2">
-          <div class="flex items-baseline gap-2">
-            <span class="font-mono text-[26px] font-bold leading-none text-white" id="gap-rank">#1</span>
-            <span class="text-[11px] uppercase tracking-[0.14em] text-slate-500">supported gap</span>
+      <div class="border-b border-white/[0.06] px-4 py-3.5">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2.5">
+              <span id="gap-rank" class="font-mono text-[30px] font-semibold leading-none tracking-tight text-white">#1</span>
+              <div class="leading-tight">
+                <div class="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-slate-500">Supported gap</div>
+                <div class="mt-1 flex items-center gap-1.5">
+                  <span id="gap-arch" class="badge"></span>
+                  <span id="gap-boundary-badge" class="badge warn hidden">outer edge</span>
+                </div>
+              </div>
+            </div>
+            <div class="mt-2.5 flex items-center gap-1.5 font-mono text-[11.5px]">
+              <i data-lucide="crosshair" class="h-3 w-3 text-slate-600"></i>
+              <span id="gap-coords" class="text-cyan-300"></span>
+            </div>
           </div>
-          <span id="gap-dideal" class="font-mono text-[11px] text-slate-400" title="Euclidean distance to the ideal corner (1, 1, 1, 1)"></span>
-        </div>
-        <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-slate-400">
-          <span class="text-slate-500">chart</span>
-          <span id="gap-coords" class="text-cyan-300"></span>
-          <span id="gap-boundary-badge" class="hidden rounded border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 text-[9.5px] uppercase tracking-wider text-amber-300">outer edge</span>
+          <div class="shrink-0 text-right">
+            <div class="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">d_ideal</div>
+            <div id="gap-dideal" class="font-mono text-[15px] leading-tight text-slate-200" title="Euclidean distance to the ideal corner (1, 1, 1, 1)"></div>
+          </div>
         </div>
       </div>
 
-      <div class="border-b border-white/5 px-3 py-3">
-        <div class="mb-1 flex items-center justify-between px-1">
-          <span class="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Objective scorecard</span>
-          <span class="text-[9.5px] text-slate-600">0 to 1, higher is better</span>
+      <div class="border-b border-white/[0.06] px-3 py-3">
+        <div class="mb-1 flex items-baseline justify-between gap-2 px-0.5">
+          <span class="sh"><i data-lucide="target" class="h-3 w-3"></i>Objective scorecard</span>
+          <span class="text-[9px] text-slate-500">0–1 · higher is better</span>
         </div>
-        <div id="radar" class="h-[210px] w-full"></div>
-        <div id="stats" class="mt-1 grid grid-cols-2 gap-1.5"></div>
+        <div id="radar" class="radar-panel h-[196px] w-full"></div>
+        <div id="stats" class="mt-1.5 grid grid-cols-3 gap-1.5"></div>
       </div>
 
-      <div class="border-b border-white/5 px-4 py-3">
-        <div class="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Regime mixture at this location</div>
+      <div class="border-b border-white/[0.06] px-3 py-3">
+        <div class="mb-1.5 flex items-baseline justify-between gap-2 px-0.5">
+          <span class="sh"><i data-lucide="pie-chart" class="h-3 w-3"></i>Regime mixture</span>
+          <span class="text-[9px] text-slate-500">global / adaptive</span>
+        </div>
         <div id="mixture"></div>
       </div>
 
-      <div class="border-b border-white/5 px-3 py-3">
-        <div class="mb-2 flex items-center justify-between px-1">
-          <span class="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Top 5 contributing anchor papers</span>
-          <span class="text-[9.5px] text-slate-600">SPH weight</span>
+      <div class="border-b border-white/[0.06] px-3 py-3">
+        <div class="mb-1.5 flex items-baseline justify-between gap-2 px-0.5">
+          <span class="sh"><i data-lucide="layers" class="h-3 w-3"></i>Anchor papers</span>
+          <span class="text-[9px] text-slate-500">top 5 · SPH weight</span>
         </div>
         <div id="anchors" class="space-y-1.5"></div>
       </div>
 
-      <div class="border-b border-white/5 px-3 py-3">
-        <div class="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Lexical lens breakdown</div>
+      <div class="border-b border-white/[0.06] px-3 py-3">
+        <div class="mb-2 flex items-baseline justify-between gap-2 px-0.5">
+          <span class="sh"><i data-lucide="type" class="h-3 w-3"></i>Lexical lenses</span>
+          <span class="text-[9px] text-slate-500">local vocabulary</span>
+        </div>
 
         <div class="mb-3">
-          <div class="mb-1 flex items-center gap-1.5 px-1">
+          <div class="mb-1.5 flex items-center gap-1.5 px-0.5">
             <span class="chip-dot" style="background:#22d3ee"></span>
             <span class="text-[10.5px] font-medium text-slate-300">L2 theme lens</span>
-            <span class="text-[9.5px] text-slate-600">local research theme</span>
+            <span class="text-[9px] text-slate-500">high local mass</span>
           </div>
           <div id="lens-theme" class="flex flex-wrap gap-1"></div>
         </div>
 
         <div class="mb-3">
-          <div class="mb-1 flex items-center gap-1.5 px-1">
+          <div class="mb-1.5 flex items-center gap-1.5 px-0.5">
             <span class="chip-dot" style="background:#34d399"></span>
             <span class="text-[10.5px] font-medium text-slate-300">Emergent shared topics</span>
-            <span class="rounded bg-emerald-400/10 px-1 font-mono text-[9px] text-emerald-300">df &ge; 4</span>
+            <span class="badge" style="color:#6ee7b7;border-color:rgba(52,211,153,.3);background:rgba(52,211,153,.1)">df ≥ 4</span>
           </div>
           <div id="lens-emergent"></div>
         </div>
 
         <div>
-          <div class="mb-1 flex items-center gap-1.5 px-1">
+          <div class="mb-1.5 flex items-center gap-1.5 px-0.5">
             <span class="chip-dot" style="background:#f472b6"></span>
             <span class="text-[10.5px] font-medium text-slate-300">Limited-source hypotheses</span>
-            <span class="rounded bg-pink-400/10 px-1 font-mono text-[9px] text-pink-300">df &le; 3</span>
+            <span class="badge" style="color:#f9a8d4;border-color:rgba(244,114,182,.3);background:rgba(244,114,182,.1)">df ≤ 3</span>
           </div>
           <div id="lens-limited"></div>
         </div>
       </div>
 
       <div class="px-3 py-3">
-        <div class="mb-2 flex items-center justify-between gap-2 px-1">
+        <div class="mb-2 flex items-start justify-between gap-2 px-0.5">
           <div>
-            <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Appendix A.1 prompt</div>
-            <div class="text-[9.5px] text-slate-600">verbatim template, pre-filled for this gap</div>
+            <div class="sh"><i data-lucide="sparkles" class="h-3 w-3"></i>Appendix A.1 prompt</div>
+            <div class="mt-0.5 text-[9px] text-slate-500">verbatim template, pre-filled for this gap</div>
           </div>
           <div class="flex shrink-0 items-center gap-1.5">
-            <button id="download-btn" class="rounded-md border border-white/10 p-1.5 text-slate-400 hover:text-white" title="Download prompt as .txt" aria-label="Download prompt">
+            <button id="download-btn" class="icon-btn" title="Download prompt as .txt" aria-label="Download prompt">
               <i data-lucide="download" class="h-3.5 w-3.5"></i>
             </button>
-            <button id="copy-btn" class="flex items-center gap-1.5 rounded-md border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-1.5 text-[11px] font-medium text-cyan-200 hover:bg-cyan-400/20">
+            <button id="copy-btn" class="flex items-center gap-1.5 rounded-lg border border-cyan-400/30 bg-cyan-400/[0.12] px-2.5 py-1.5 text-[11px] font-medium text-cyan-200 transition-colors hover:border-cyan-400/50 hover:bg-cyan-400/20">
               <i data-lucide="copy" class="h-3.5 w-3.5"></i>
-              <span id="copy-label">Copy prompt</span>
+              <span id="copy-label">Copy</span>
             </button>
           </div>
         </div>
-        <pre id="prompt" class="prompt-pre max-h-[340px] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-white/10 bg-panelDeep p-3 font-mono text-[10.5px] leading-relaxed text-slate-300"></pre>
+        <pre id="prompt" class="prompt"></pre>
+        <div id="prompt-meta" class="mt-1 flex items-center justify-between gap-3 px-0.5 font-mono text-[9px] text-slate-600"></div>
       </div>
 
     </div>
   </aside>
 </main>
+
+<div id="toast" class="toast" role="status" aria-live="polite">
+  <i data-lucide="check" class="h-3.5 w-3.5"></i>
+  <span id="toast-text">Copied to clipboard</span>
+</div>
 
 <script>
 "use strict";
@@ -257,12 +502,22 @@ const ARC_CLASS = {
   "Archetype C": "arc-C"
 };
 
-/* Dark-friendly field gradients, one hue per objective. */
-const FIELD_STYLE = {
-  P_boundary: { from: "rgba(8,145,178,0)", via: "rgba(34,211,238,0.35)", to: "rgba(165,243,252,0.92)" },
-  W: { from: "rgba(180,83,9,0)", via: "rgba(251,191,36,0.35)", to: "rgba(254,243,199,0.92)" },
-  G: { from: "rgba(5,150,105,0)", via: "rgba(52,211,153,0.35)", to: "rgba(209,250,229,0.92)" },
-  S: { from: "rgba(109,40,217,0)", via: "rgba(192,132,252,0.35)", to: "rgba(237,233,254,0.92)" }
+/* One neutral intensity ramp for every field layer. Regime colour is the only
+   categorical colour on the map, so a cyan P_boundary wash would read as a
+   "SysID region" and an amber W wash as "Sim2Real region". The field legend in
+   the toolbar names the active layer and its numeric range instead. */
+const FIELD_RAMP = [
+  [0.0, "rgba(148,163,184,0.00)"],
+  [0.35, "rgba(148,163,184,0.16)"],
+  [0.70, "rgba(203,213,225,0.36)"],
+  [1.0, "rgba(248,250,252,0.66)"]
+];
+
+const FIELD_META = {
+  P_boundary: { label: "Persistent boundary", hint: "harmonic mean of global and adaptive boundary strength" },
+  W: { label: "White-space novelty", hint: "band-pass quantile filter on nearest-neighbour distance" },
+  G: { label: "Semantic gradient", hint: "Frobenius norm of the semantic-field Jacobian" },
+  S: { label: "Evidential support", hint: "inverse-Simpson N_eff, d5, and top-3 concentration" }
 };
 
 const state = { gapIndex: 0, layer: "none", radarReady: false };
@@ -298,10 +553,6 @@ function append(parent, children) {
   }
   const node = children instanceof Node ? children : document.createTextNode(String(children));
   parent.append(node);
-}
-
-function svgIcon(name, className) {
-  return el("i", { "data-lucide": name, class: className });
 }
 
 function clear(node) {
@@ -340,52 +591,44 @@ function icons() {
   }
 }
 
-/* ────────────────────────── header chips ────────────────────────── */
+/* ────────────────────────── header metrics ────────────────────────── */
 function renderHeader() {
   const meta = DATA.meta;
-  const chips = [
-    ["file-text", meta.papers + " papers"],
-    ["star", meta.gaps + " practical gaps"],
-    ["boxes", meta.archetypes + " archetypes"],
-    ["activity", "stress " + fmt(meta.stress, 2)],
-    ["git-branch", "rho " + fmt(meta.spearman, 4)],
-    ["cpu", meta.model]
+  const model = String(meta.model).split("/").pop();
+  const metrics = [
+    [String(meta.papers), "papers"],
+    [String(meta.gaps), "practical gaps"],
+    [String(meta.archetypes), "archetypes"],
+    [fmt(meta.stress, 1), "stress"],
+    ["\u03c1 " + fmt(meta.spearman, 3), "distance corr."],
+    [model, "embedding model"]
   ];
   const host = document.getElementById("metric-chips");
   clear(host);
-  chips.forEach(function (chip) {
-    append(host, el("span", {
-      class: "flex items-center gap-1.5 rounded-md border border-white/5 bg-white/[0.04] px-2 py-1 font-mono text-[10.5px] text-slate-400"
-    }, [svgIcon(chip[0], "h-3 w-3 text-slate-500"), el("span", { text: chip[1] })]));
+  metrics.forEach(function (entry) {
+    append(host, el("div", { class: "metric", title: entry[1] }, [
+      el("b", { text: entry[0] }),
+      el("i", { text: entry[1] })
+    ]));
   });
   icons();
 }
 
 /* ────────────────────────── manifold ────────────────────────── */
 function heatmapTrace(field, axis) {
-  const style = FIELD_STYLE[field.name] || FIELD_STYLE.P_boundary;
+  const meta = FIELD_META[field.name] || { label: field.name, hint: "" };
   return {
     type: "heatmap",
-    name: field.name,
+    name: meta.label,
     x: axis,
     y: axis,
     z: field.z,
     visible: false,
-    opacity: 0.92,
     zsmooth: "best",
     hoverinfo: "skip",
     showscale: false,
-    colorscale: [[0, style.from], [0.5, style.via], [1, style.to]],
-    colorbar: {
-      title: { text: field.name, font: { family: "JetBrains Mono, monospace", size: 10, color: "#94a3b8" } },
-      thickness: 8,
-      len: 0.55,
-      x: 1.005,
-      tickfont: { family: "JetBrains Mono, monospace", size: 9, color: "#64748b" },
-      outlinewidth: 0,
-      bgcolor: "rgba(0,0,0,0)"
-    },
-    contours: { show: true, color: "rgba(255,255,255,0.16)", width: 1 },
+    colorscale: FIELD_RAMP,
+    contours: { show: true, color: "rgba(226,232,240,0.10)", width: 1 },
     showlegend: false
   };
 }
@@ -408,9 +651,10 @@ function paperTrace(regime) {
     marker: {
       size: 8.5,
       color: regime.color,
-      opacity: 0.82,
-      line: { width: 0.7, color: "rgba(11,15,25,0.9)" }
-    }
+      opacity: 0.88,
+      line: { width: 1, color: "rgba(8,11,18,0.92)" }
+    },
+    showlegend: false
   };
 }
 
@@ -499,35 +743,34 @@ function buildManifold() {
   });
 
   const layout = {
-    paper_bgcolor: "#0b0f19",
-    plot_bgcolor: "#0b0f19",
+    paper_bgcolor: "#080b12",
+    plot_bgcolor: "#080b12",
     font: { family: "Inter, system-ui, sans-serif", size: 11, color: "#94a3b8" },
-    margin: { l: 46, r: 18, t: 16, b: 40 },
+    margin: { l: 42, r: 14, t: 12, b: 34 },
     hovermode: "closest",
     hoverlabel: {
-      bgcolor: "rgba(15,23,42,0.96)", bordercolor: "#334155",
+      bgcolor: "rgba(12,18,28,0.97)", bordercolor: "rgba(148,163,184,0.28)",
       font: { family: "Inter, system-ui, sans-serif", size: 11.5, color: "#e2e8f0" },
       align: "left"
     },
     xaxis: {
-      title: { text: "knowledge manifold x", font: { size: 10, color: "#64748b" } },
-      range: [-1.09, 1.09], zeroline: true, zerolinecolor: "rgba(148,163,184,0.22)",
-      gridcolor: "rgba(148,163,184,0.08)",
-      tickfont: { family: "JetBrains Mono, monospace", size: 9.5, color: "#64748b" },
+      title: { text: "knowledge manifold x", font: { size: 9.5, color: "#475569" } },
+      range: [-1.09, 1.09], zeroline: true, zerolinecolor: "rgba(148,163,184,0.20)",
+      gridcolor: "rgba(148,163,184,0.07)",
+      tickfont: { family: "JetBrains Mono, monospace", size: 9, color: "#475569" },
       dtick: 0.5, constrain: "domain"
     },
     yaxis: {
-      title: { text: "knowledge manifold y", font: { size: 10, color: "#64748b" } },
-      range: [-1.09, 1.09], zeroline: true, zerolinecolor: "rgba(148,163,184,0.22)",
-      gridcolor: "rgba(148,163,184,0.08)",
-      tickfont: { family: "JetBrains Mono, monospace", size: 9.5, color: "#64748b" },
+      title: { text: "knowledge manifold y", font: { size: 9.5, color: "#475569" } },
+      range: [-1.09, 1.09], zeroline: true, zerolinecolor: "rgba(148,163,184,0.20)",
+      gridcolor: "rgba(148,163,184,0.07)",
+      tickfont: { family: "JetBrains Mono, monospace", size: 9, color: "#475569" },
       dtick: 0.5, scaleanchor: "x", scaleratio: 1
     },
-    legend: {
-      orientation: "h", x: 0.01, y: 0.01, xanchor: "left", yanchor: "bottom",
-      bgcolor: "rgba(11,15,25,0.72)", bordercolor: "rgba(148,163,184,0.18)", borderwidth: 1,
-      font: { size: 10.5, color: "#cbd5e1" }, itemsizing: "constant"
-    },
+    /* The toolbar carries a static legend instead: Plotly's own legend cannot
+       align its swatches with text well enough at this size, and the two star
+       glyphs need explaining in words. */
+    showlegend: false,
     annotations: [{
       x: top.x, y: top.y, text: "#1 compromise",
       showarrow: true, arrowhead: 0, arrowwidth: 1, arrowcolor: "rgba(251,191,36,0.65)",
@@ -562,13 +805,14 @@ function buildManifold() {
 }
 
 /* ────────────────────────── drawer ────────────────────────── */
-function statCell(label, value, hint) {
+function statCell(label, value, hint, unit) {
   return el("div", {
-    class: "rounded-md border border-white/5 bg-white/[0.03] px-2 py-1.5",
+    class: "stat",
     title: hint || ""
   }, [
-    el("div", { class: "text-[9px] uppercase tracking-[0.1em] text-slate-500", text: label }),
-    el("div", { class: "font-mono text-[13px] text-slate-100", text: value })
+    el("span", { text: label }),
+    el("b", { text: value }),
+    el("em", { text: unit || "" })
   ]);
 }
 
@@ -584,7 +828,7 @@ function renderRadar(gap) {
     r: values.concat([values[0]]),
     theta: labels.concat([labels[0]]),
     fill: "toself",
-    fillcolor: hexToRgba(color, 0.16),
+    fillcolor: hexToRgba(color, 0.18),
     line: { color: color, width: 2 },
     marker: { size: 5, color: color },
     text: values.map(function (v) { return fmt(v, 2); }).concat([""]),
@@ -594,20 +838,31 @@ function renderRadar(gap) {
     showlegend: false
   };
 
+  /* Dashed reference ring at r = 1: the ideal corner this gap is ranked against. */
+  const ideal = {
+    type: "scatterpolar",
+    mode: "lines",
+    r: [1, 1, 1, 1, 1],
+    theta: labels.concat([labels[0]]),
+    line: { color: "rgba(148,163,184,0.30)", width: 1, dash: "dot" },
+    hoverinfo: "skip",
+    showlegend: false
+  };
+
   const layout = {
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "rgba(0,0,0,0)",
     font: { family: "JetBrains Mono, monospace", size: 9.5, color: "#94a3b8" },
-    margin: { l: 46, r: 46, t: 20, b: 20 },
+    margin: { l: 44, r: 44, t: 18, b: 18 },
     polar: {
-      bgcolor: "rgba(20,28,43,0.55)",
+      bgcolor: "rgba(148,163,184,0.03)",
       radialaxis: {
-        range: [0, 1], showline: false, tickvals: [0.25, 0.5, 0.75, 1],
-        tickfont: { size: 8, color: "#475569" },
-        gridcolor: "rgba(148,163,184,0.14)", angle: 90
+        range: [0, 1], showline: false, tickvals: [0.5, 1],
+        tickfont: { size: 7.5, color: "#3f4d63" },
+        gridcolor: "rgba(148,163,184,0.12)", angle: 90
       },
       angularaxis: {
-        gridcolor: "rgba(148,163,184,0.18)",
+        gridcolor: "rgba(148,163,184,0.14)",
         tickfont: { family: "Inter, sans-serif", size: 9.5, color: "#cbd5e1" }
       }
     },
@@ -615,9 +870,9 @@ function renderRadar(gap) {
   };
 
   if (state.radarReady) {
-    Plotly.react("radar", [trace], layout, { displayModeBar: false });
+    Plotly.react("radar", [trace, ideal], layout, { displayModeBar: false });
   } else {
-    Plotly.newPlot("radar", [trace], layout, { displayModeBar: false, responsive: true });
+    Plotly.newPlot("radar", [trace, ideal], layout, { displayModeBar: false, responsive: true });
     state.radarReady = true;
   }
 }
@@ -626,12 +881,12 @@ function renderStats(gap) {
   const host = document.getElementById("stats");
   clear(host);
   [
-    statCell("N_eff", fmt(gap.n_eff, 1), "Inverse Simpson effective number of contributing documents"),
-    statCell("d5", fmt(gap.d5, 3), "Distance to the fifth-nearest document"),
-    statCell("T3", fmt(gap.t3, 3), "Top-three weight concentration"),
-    statCell("H", fmt(gap.H, 3), "Normalized mixture entropy across regimes"),
-    statCell("u", fmt(gap.u, 4), "Relative GP uncertainty (diagnostic, not an objective)"),
-    statCell("rank", "#" + gap.rank + " / " + DATA.gaps.length, "Rank by distance to the ideal corner")
+    statCell("N_eff", fmt(gap.n_eff, 1), "Inverse Simpson effective number of contributing documents", "1 / \u03a3w\u00b2"),
+    statCell("d5", fmt(gap.d5, 3), "Distance to the fifth-nearest document", "5th dist"),
+    statCell("T3", fmt(gap.t3, 3), "Top-three weight concentration", "top-3"),
+    statCell("H", fmt(gap.H, 3), "Normalized mixture entropy across regimes", "entropy"),
+    statCell("u", fmt(gap.u, 4), "Relative GP uncertainty (diagnostic, not an objective)", "GP sd"),
+    statCell("rank", "#" + gap.rank, "Rank by distance to the ideal corner", "of " + DATA.gaps.length)
   ].forEach(function (cell) { append(host, cell); });
 }
 
@@ -642,31 +897,24 @@ function renderMixture(gap) {
   });
   const total = rows.reduce(function (sum, r) { return sum + r.global; }, 0) || 1;
 
-  const bar = el("div", { class: "mixture-bar mb-1.5" }, rows.map(function (r) {
+  const bar = el("div", { class: "mix-bar" }, rows.map(function (r) {
     return el("i", { style: { width: (100 * r.global / total).toFixed(2) + "%", background: r.color } });
   }));
 
-  const legend = el("div", null, rows.map(function (r) {
-    return el("div", { class: "flex items-center justify-between gap-2 py-0.5" }, [
-      el("span", { class: "flex items-center gap-1.5" }, [
+  const list = el("div", { class: "mt-1.5" }, rows.map(function (r) {
+    return el("div", { class: "mix-row" }, [
+      el("span", { class: "nm" }, [
         el("span", { class: "chip-dot", style: { background: r.color } }),
-        el("span", { class: "text-[10.5px] text-slate-300", text: r.label })
+        el("span", { text: r.label })
       ]),
-      el("span", { class: "font-mono text-[10.5px] text-slate-400" }, [
-        el("span", { text: fmt(r.global, 3) + " " }),
-        el("span", { class: "text-slate-600", text: "/ " + fmt(r.adaptive, 3) })
-      ])
+      el("span", { class: "vl", title: "global SPH field", text: fmt(r.global, 3) }),
+      el("span", { class: "ad", title: "adaptive 8-NN bandwidth field", text: fmt(r.adaptive, 3) })
     ]);
   }));
 
-  const note = el("div", {
-    class: "mt-1 text-[9px] text-slate-600",
-    text: "global SPH field / adaptive (8-NN) field"
-  });
-
   const host = document.getElementById("mixture");
   clear(host);
-  append(host, [bar, legend, note]);
+  append(host, [bar, list]);
 }
 
 function renderAnchors(gap) {
@@ -677,18 +925,18 @@ function renderAnchors(gap) {
   gap.anchors.forEach(function (anchor, position) {
     const color = REGIME_COLOR[anchor.regime] || "#94a3b8";
     append(host, el("a", {
-      class: "block rounded-lg border border-white/5 bg-white/[0.03] p-2 transition hover:border-white/20 hover:bg-white/[0.06]",
+      class: "anchor",
       href: anchor.url,
       target: "_blank",
       rel: "noopener noreferrer"
     }, [
       el("div", { class: "flex items-start gap-2" }, [
-        el("span", { class: "mt-0.5 font-mono text-[10px] text-slate-600", text: String(position + 1) }),
+        el("span", { class: "idx", text: String(position + 1) }),
         el("div", { class: "min-w-0 flex-1" }, [
-          el("div", { class: "clamp-2 text-[12px] leading-snug text-slate-100", text: anchor.title }),
+          el("div", { class: "ttl", text: anchor.title }),
           el("div", {
             class: "mt-0.5 truncate text-[10px] text-slate-500",
-            text: anchor.authors.join(", ") + " · " + anchor.year
+            text: anchor.authors[0] + (anchor.authors.length > 1 ? " et al." : "") + " · " + anchor.year + " · " + anchor.regime
           }),
           el("div", { class: "mt-1.5 flex items-center gap-1.5" }, [
             el("span", {
@@ -696,10 +944,10 @@ function renderAnchors(gap) {
               style: { background: hexToRgba(color, 0.14), color: color },
               text: anchor.regime
             }),
-            el("span", { class: "weight-bar flex-1" }, [
+            el("span", { class: "wbar flex-1" }, [
               el("i", { style: { width: Math.max(4, 100 * anchor.weight / maxWeight).toFixed(1) + "%" } })
             ]),
-            el("span", { class: "shrink-0 font-mono text-[10px] text-slate-300", text: fmt(anchor.weight, 4) })
+            el("span", { class: "wv", text: fmt(anchor.weight, 4) })
           ])
         ])
       ])
@@ -707,22 +955,18 @@ function renderAnchors(gap) {
   });
 }
 
-function lensRow(term, df, extra, toneColor) {
-  return el("tr", { class: "border-t border-white/5" }, [
-    el("td", { class: "py-1 pr-2 font-mono text-[11px] text-slate-200", text: term }),
-    el("td", { class: "py-1 pr-2" }, [
-      el("span", {
-        class: "rounded px-1 py-[1px] font-mono text-[9px]",
-        style: { background: toneColor },
-        text: "df=" + df
-      })
+function lensRow(term, df, extra) {
+  return el("tr", null, [
+    el("td", { class: "term", text: term }),
+    el("td", { style: { paddingRight: "8px", whiteSpace: "nowrap" } }, [
+      el("span", { class: "df", text: "df " + df })
     ]),
-    el("td", { class: "py-1 text-[10px] text-slate-400" }, extra)
+    el("td", { class: "src" }, extra)
   ]);
 }
 
 function lensTable(rows) {
-  return el("table", { class: "w-full lens-table" }, [el("tbody", null, rows)]);
+  return el("table", { class: "lens" }, [el("tbody", null, rows)]);
 }
 
 function renderLenses(gap) {
@@ -731,17 +975,15 @@ function renderLenses(gap) {
   if (gap.theme_lens.length) {
     gap.theme_lens.forEach(function (entry) {
       append(themeHost, el("span", {
-        title: "word forms: " + entry.word_forms.join(", "),
-        class: "rounded border px-1.5 py-[2px] font-mono text-[10px] " + (entry.in_both_lenses
-          ? "border-cyan-400/40 bg-cyan-400/15 text-cyan-100"
-          : "border-white/10 bg-white/[0.04] text-slate-300")
+        title: "word forms: " + entry.word_forms.join(", ") + " \u00b7 document frequency " + entry.df,
+        class: "chip" + (entry.in_both_lenses ? " both" : "")
       }, [
         el("span", { text: entry.term }),
-        el("span", { class: "ml-1 text-[8.5px] text-slate-500", text: String(entry.df) })
+        el("span", { class: "n", text: String(entry.df) })
       ]));
     });
   } else {
-    append(themeHost, el("span", { class: "text-[10px] text-slate-600", text: "no theme terms" }));
+    append(themeHost, el("span", { class: "empty", text: "No theme term clears the local-mass threshold here." }));
   }
 
   const emergentHost = document.getElementById("lens-emergent");
@@ -750,14 +992,13 @@ function renderLenses(gap) {
     append(emergentHost, lensTable(gap.emergent.map(function (entry) {
       return lensRow(
         entry.term, entry.df,
-        "x" + fmt(entry.enrichment, 2) + " local enrichment",
-        "rgba(52,211,153,0.14)"
+        "\u00d7" + fmt(entry.enrichment, 2) + " local enrichment"
       );
     })));
   } else {
     append(emergentHost, el("p", {
-      class: "px-1 text-[10px] text-slate-600",
-      text: "No concentration term reaches df >= 4 here, so everything is single- or two-source."
+      class: "empty",
+      text: "No concentration term reaches df \u2265 4 here: every local term is single- or two-source."
     }));
   }
 
@@ -774,23 +1015,22 @@ function renderLenses(gap) {
             rel: "noopener noreferrer",
             text: source.doc
           }),
-          el("span", { class: "ml-1 text-slate-600", text: fmt(source.weight, 3) })
+          el("b", { text: fmt(source.weight, 3) })
         ]);
       });
       return lensRow(
         entry.term, entry.df,
-        sources.length ? sources : "not attested in a contributing document",
-        "rgba(244,114,182,0.14)"
+        sources.length ? sources : "not attested in a contributing document"
       );
     })));
     append(limitedHost, el("p", {
-      class: "mt-1 px-1 text-[9.5px] leading-relaxed text-slate-600",
+      class: "empty mt-1",
       text: "These terms are hypotheses attributed to the listed documents, not established regional knowledge."
     }));
   } else {
     append(limitedHost, el("p", {
-      class: "px-1 text-[10px] text-slate-600",
-      text: "No df <= 3 terms surfaced at this location."
+      class: "empty",
+      text: "No df \u2264 3 term surfaced at this location."
     }));
   }
 }
@@ -800,12 +1040,11 @@ function renderDrawer() {
 
   document.getElementById("gap-rank").textContent = "#" + gap.rank;
   document.getElementById("gap-coords").textContent = "(" + signed(gap.x) + ", " + signed(gap.y) + ")";
-  document.getElementById("gap-dideal").textContent = "d_ideal " + fmt(gap.d_ideal, 4);
+  document.getElementById("gap-dideal").textContent = fmt(gap.d_ideal, 3);
 
   const archEl = document.getElementById("gap-arch");
   archEl.textContent = gap.archetype;
-  archEl.className = "shrink-0 rounded border border-white/10 px-1.5 py-0.5 font-mono text-[10px] " +
-    (ARC_CLASS[gap.archetype] || "text-slate-400");
+  archEl.className = "badge " + (ARC_CLASS[gap.archetype] || "");
 
   document.getElementById("gap-boundary-badge").classList.toggle("hidden", !gap.on_outer_boundary);
 
@@ -816,6 +1055,14 @@ function renderDrawer() {
   renderLenses(gap);
 
   document.getElementById("prompt").textContent = gap.prompt;
+
+  const promptMeta = document.getElementById("prompt-meta");
+  clear(promptMeta);
+  append(promptMeta, [
+    el("span", { text: gap.prompt.split("\n").length + " lines \u00b7 " + gap.prompt.length + " chars" }),
+    el("span", { text: gap.filename })
+  ]);
+
   document.getElementById("gap-select").value = String(state.gapIndex);
 
   const scroll = document.getElementById("drawer-scroll");
@@ -854,12 +1101,37 @@ function setLayer(name) {
   Plotly.restyle("manifold", { visible: visibility });
 
   const note = document.getElementById("layer-note");
+  clear(note);
   if (name === "none") {
-    note.textContent = "";
-  } else {
-    const field = DATA.fields.find(function (f) { return f.name === name; });
-    note.textContent = name + " · " + fmt(field.min, 3) + " to " + fmt(field.max, 3) + " across the grid";
+    note.classList.add("hidden");
+    note.classList.remove("flex");
+    return;
   }
+
+  note.classList.remove("hidden");
+  note.classList.add("flex");
+  const field = DATA.fields.find(function (f) { return f.name === name; }) || { min: 0, max: 1 };
+  const meta = FIELD_META[name] || { label: name, hint: "" };
+  append(note, el("div", { class: "field-legend", title: meta.hint }, [
+    el("span", { class: "nm", text: meta.label }),
+    el("span", {
+      class: "bar",
+      style: { background: "linear-gradient(90deg, rgba(148,163,184,0.10), rgba(148,163,184,0.36), rgba(248,250,252,0.70))" }
+    }),
+    el("span", { class: "rg", text: fmt(field.min, 2) + " → " + fmt(field.max, 2) })
+  ]));
+}
+
+/* Transient confirmation, so a copy still gives feedback after the button label
+   has already returned to "Copy". */
+function showToast(message) {
+  const toast = document.getElementById("toast");
+  const text = document.getElementById("toast-text");
+  if (!toast || !text) return;
+  text.textContent = message;
+  toast.classList.add("show");
+  if (showToast.timer) clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(function () { toast.classList.remove("show"); }, 2400);
 }
 
 async function copyPrompt() {
@@ -887,8 +1159,11 @@ async function copyPrompt() {
     }
   }
 
-  label.textContent = ok ? "Copied" : "Press Ctrl+C";
+  label.textContent = ok ? "Copied" : "Select all";
   button.classList.toggle("border-emerald-400/40", ok);
+  showToast(ok
+    ? "Prompt copied \u2014 " + DATA.gaps[state.gapIndex].filename
+    : "Clipboard blocked. The prompt is selected: press Ctrl+C.");
 
   if (!ok) {
     const range = document.createRange();
@@ -897,7 +1172,7 @@ async function copyPrompt() {
     selection.removeAllRanges();
     selection.addRange(range);
   }
-  setTimeout(function () { label.textContent = "Copy prompt"; }, 1800);
+  setTimeout(function () { label.textContent = "Copy"; }, 1800);
 }
 
 function downloadPrompt() {
