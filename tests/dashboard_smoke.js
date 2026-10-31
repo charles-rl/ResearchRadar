@@ -97,6 +97,10 @@ const documentStub = {
 const payloadNode = documentStub.getElementById("radar-data");
 payloadNode.textContent = payloadMatch[1];
 
+// Parsed once here so assertions compare the DOM against the real payload
+// instead of against numbers frozen at whatever corpus run wrote this file.
+const DATA = JSON.parse(payloadMatch[1]);
+
 let plotlyCalls = [];
 function resolve(target) {
   return typeof target === "string" ? documentStub.getElementById(target) : target;
@@ -184,8 +188,9 @@ if (!main) {
 
   const gaps = traces.find((t) => t.name === "Supported Knowledge Gaps");
   if (!gaps) fail("no 'Supported Knowledge Gaps' trace");
-  else if (gaps.x.length !== 33) fail("gap trace has " + gaps.x.length + " points, expected 33");
-  else pass("33 clickable gap markers");
+  else if (gaps.x.length !== DATA.gaps.length)
+    fail("gap trace has " + gaps.x.length + " points, payload has " + DATA.gaps.length);
+  else pass(DATA.gaps.length + " clickable gap markers");
 
   const fields = traces.filter((t) => t.type === "heatmap");
   if (fields.length !== 4) fail("expected 4 heatmap layers, got " + fields.length);
@@ -203,10 +208,12 @@ if (!main) {
             " vs z[y=-0.7][x=+0.7]=" + direct.toFixed(4));
 
   const top = traces.find((t) => t.name === "#1 compromise");
+  const best = DATA.gaps[0];
   if (!top) fail("no #1 compromise trace");
-  else if (Math.abs(top.x[0] + 0.1) > 1e-9 || Math.abs(top.y[0] + 0.5) > 1e-9)
-    fail("#1 compromise is at (" + top.x[0] + ", " + top.y[0] + "), expected (-0.1, -0.5)");
-  else pass("#1 compromise marker at (-0.10, -0.50)");
+  else if (Math.abs(top.x[0] - best.x) > 1e-9 || Math.abs(top.y[0] - best.y) > 1e-9)
+    fail("#1 compromise is at (" + top.x[0] + ", " + top.y[0] + "), payload says ("
+         + best.x + ", " + best.y + ")");
+  else pass("#1 compromise marker at the payload's best point (" + best.x + ", " + best.y + ")");
 
   // Hover text must carry real content, not placeholders.
   const sample = papers[0].text[0];
@@ -227,17 +234,25 @@ const options = documentStub.getElementById("gap-select").all().filter((n) => n.
 
 if (rank !== "#1") fail("drawer rank is " + JSON.stringify(rank) + ", expected #1");
 else pass("drawer shows gap #1");
-if (coords !== "(-0.10, -0.50)") fail("drawer coords are " + JSON.stringify(coords));
-else pass("drawer coordinates match the #1 point");
-if (!promptText.includes("evidence_point_-0.10_-0.50.json")) fail("prompt does not name the evidence file");
+const bestGap = DATA.gaps[0];
+const expectedCoords =
+  "(" + bestGap.x.toFixed(2) + ", " + (bestGap.y >= 0 ? "+" : "-") + Math.abs(bestGap.y).toFixed(2) + ")";
+const expectedCoordsPlain = /sign/.test("nosign")
+  ? expectedCoords
+  : expectedCoords.replace("(+", "(").replace("+-", "-");
+if (coords !== expectedCoords && coords !== expectedCoordsPlain)
+  fail("drawer coords are " + JSON.stringify(coords) + ", payload says " + expectedCoords);
+else pass("drawer coordinates match the #1 point (" + coords + ")");
+if (!promptText.includes(bestGap.filename)) fail("prompt does not name its evidence file " + bestGap.filename);
 else if (!promptText.includes("Rules (binding)")) fail("prompt is missing the template body");
 else pass("prompt rendered with the evidence filename (" + promptText.length + " chars)");
 if (stats.length < 12) fail("stats grid rendered only " + stats.length + " text nodes");
 else pass("stats grid rendered (" + stats.length + " text nodes)");
 if (anchors.length !== 5) fail("rendered " + anchors.length + " anchor links, expected 5");
 else pass("5 anchor paper links rendered");
-if (options.length !== 33) fail("gap dropdown has " + options.length + " options, expected 33");
-else pass("gap dropdown has all 33 gaps");
+if (options.length !== DATA.gaps.length)
+  fail("gap dropdown has " + options.length + " options, payload has " + DATA.gaps.length);
+else pass("gap dropdown has all " + DATA.gaps.length + " gaps");
 
 const radarCall = plotlyCalls.find((c) => c.traces && c.traces[0] && c.traces[0].type === "scatterpolar");
 if (!radarCall) fail("polar radar chart was never created");

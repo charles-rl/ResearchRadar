@@ -35,7 +35,7 @@ Rules (binding)
    (e.g. "as explored in only one neighboring study [doc 18]"). 
    Never present a `df <= 3` word as established regional knowledge. 
 3. **No outside facts.**  Do not assert anything the evidence package 
-   does not support.  Your general knowledge of composites may be used 
+   does not support.  Your general knowledge of robotics may be used 
    to connect the evidence into fluent prose, not to add claims absent 
    from it. 
 4. **Use every listed word or account for it.**  All terms in the 

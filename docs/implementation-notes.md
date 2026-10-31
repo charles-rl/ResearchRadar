@@ -3,6 +3,12 @@
 Things that are **not** obvious from reading `src/`. Each item cost real
 debugging time; most are environment-specific traps rather than design choices.
 
+> **The pipeline no longer uses Ollama.** The analysis is a 1:1 reproduction of
+> Obayashi et al. (2026), which builds a character n-gram TF-IDF representation
+> and states in Sec. 5.5 that no language model enters any objective. The Ollama
+> / F2LLM material below is retained because the models are still installed and
+> still serve correct unit-norm vectors; it is simply not part of the manifold.
+
 ## Why the models had to be converted to GGUF
 
 `ollama create` cannot ingest the F2LLM checkpoints from their safetensors
@@ -147,9 +153,89 @@ by different models. The cache keys on `model`, so switching forces a re-embed.
   PDFs and weights.
 - **Novelty is corpus-relative.** The Pareto gaps are gaps in a 120-paper arXiv
   sample, not proof that the topics are unexplored in the wider literature.
-- **Abstracts, not full text.** Obayashi et al. (2026) use full-text character
-  n-grams; this pipeline only has titles and abstracts, so term statistics are not
-  numerically comparable to the paper's.
+- **Full text, but only what `mutool` can extract.** The corpus is now built from
+  full-text PDFs (120 of 120 extracted, 0 failures, shortest 1417 words), so term
+  statistics are on the paper's footing. Text is still extractable-text only:
+  figures, tables rendered as images, and equations are lost.
+- **The word-family rule under-merges on purpose.** `vortex`/`vortices`/`vortical`
+  share a family, but `vorticity` can land on its own key. A tighter rule
+  mis-merged `manifest`/`manifold` and `control`/`contrast`, which would present
+  one word's evidence under another word's name. Every entry lists its attested
+  `word_forms`, so an under-merge stays visible and harmless.
+- **N-gram coverage of whole words is 4.5%, not 100%.** The vocabulary is capped
+  at 250,000 n-grams, so long-tail n-grams of rare words are absent and those
+  words aggregate from fewer fragments. This affects term *ranking* at the tail,
+  not the geometry.
+- **`df` is counted per document, never per n-gram.** Counting n-grams saturated
+  every family at 120/120 (the 4-gram `repr` sits inside represent, reproduce,
+  and repress), which would have made Appendix A.1 Rule 2's `df >= 4` versus
+  `df <= 3` split meaningless.
+
+## Traps found while making the pipeline 1:1 with the paper
+
+- **A word-level vectoriser next to an n-gram map is two different spaces.** The
+  first version of `src/report.py` sliced lenses from its own
+  `TfidfVectorizer` over `title + abstract` while `src/manifold.py` used the
+  char n-gram matrix over full text. The lenses therefore described different
+  evidence than the point they were attached to. `src/report.py` now aggregates
+  the n-gram scores through `WordIndex.feature_family`, so both views share one
+  basis.
+- **`np.gradient`'s analytic shortcut is wrong here.** Deriving
+  `∂v/∂x` as `(I - vvᵀ) ∂A/∂x / ||A||` is first-order correct and matched a hand
+  derived reference, but it disagreed with a discrete central difference of `v`
+  by a factor of four (21.83 vs 5.55) because `v(x) = normalize(Σ wᵢ zᵢ)` is
+  nonlinear. The paper says "Jacobian", i.e. a derivative of `v` itself, so
+  `semantic_gradient` now evaluates the central difference exactly through the
+  Gram matrix: `cos(v_a, v_b) = (w_aᵀ K w_b)/(n_a n_b)`, `‖v_a-v_b‖² = 2-2cos`,
+  `‖dv/dx‖ = sqrt(2-2cos)/step`. It matches a dense brute force to 6e-11.
+- **Counting n-grams instead of words saturates `df`.** See the limitation above.
+  The symptom is suspiciously round: every family reports `df = 120`.
+- **A corpus-MD5 cache key is not enough.** Changing `ngram_range` or the family
+  rule rebuilds every column while leaving the corpus byte-identical, so a
+  corpus-only key silently served a stale matrix — observed in practice. The key
+  is now `corpus MD5 + settings fingerprint`, and `REPRESENTATION_VERSION` is the
+  manual lever for code changes a settings dump cannot see.
+- **`char_wb` splits on whitespace, not on `\w`.** Words therefore arrive with
+  punctuation attached (`(1972a),`) and with digits. The parent-word mapping is
+  built from the *raw* whitespace token so the n-gram really was attested there,
+  then the token is trimmed for display; tokens with no leading letter are
+  skipped rather than becoming evidence terms.
+- **"Verbatim" and a different domain are in tension.** Rule 3 of Appendix A.1
+  says "your general knowledge of composites" because the paper studied
+  aerodynamics. The template here says "robotics", so verification can no longer
+  be a byte comparison against the PDF extract. There are now two files:
+  `docs/kmo_prompt_template_A1.txt` (in use) and
+  `docs/kmo_prompt_template_A1.original.txt` (pristine), and `src/report.py`
+  asserts they differ on **exactly that one line** in exactly that one word.
+
+## The Appendix A.2 audit is a heuristic, not a verifier
+
+`src/audit.py` implements the eight A.2 checks, and three of them deserve a note
+because a reader will otherwise expect more certainty than they can give.
+
+- **`unsupported_claim_audit` cannot be a decision procedure.** A.2 forbids
+  "technical claims, mechanisms, materials, numerical performance claims, and
+  citations", but whether a sentence asserts such a claim is not a syntactic
+  property. The check flags a sentence that contains a mechanism verb, a named
+  material, a percentage or decimal, or an external citation **and** carries no
+  hedge from a fixed list. That list had to grow twice for real cases: "proposed"
+  was removed because "the proposed method improves accuracy by 40%" is exactly
+  the claim to catch (only "is proposed"/"we propose" hedge), and "caveat" /
+  "relative uncertainty is" were added because A.2 *requires* a caveat sentence
+  that necessarily contains real numbers. Treat the output as a review queue.
+- **Item 2 and item 8 read different things on purpose.** A.2 asks the answer to
+  use every supplied term *or* explicitly set it aside, and separately asks the
+  `Evidence used` list to record "the terms used ... including any term set
+  aside". The first check therefore compares against all supplied terms, while
+  the trace check compares against only the terms the prose actually used. An
+  earlier version compared the trace against the whole lens and failed correct
+  answers that had legitimately set a term aside.
+- **The `df <= 3` bar is corpus-relative.** At gap #1 the concentration lens is
+  empty because no L1-only term survives the enrichment filter there, so item 4
+  reports "nothing needed provenance" rather than a pass on real evidence. That
+  is a true statement about this corpus, not a bug, and the test suite pins the
+  behaviour with a synthetic package that does contain `df = 1` and `df = 2`
+  terms.
 
 ## Traps found while building the analysis stages
 
@@ -243,10 +329,11 @@ reading the template.
 
 ## Offline verification
 
-All five stages verify without network access and exit non-zero on failure:
+All stages verify without network access and exit non-zero on failure:
 
 ```bash
 .venv/bin/python -m src.harvest  --verify-only   # 40/40/40, unique ids + titles
+.venv/bin/python -m src.harvest  --verify-fulltext  # 120 papers, 0 remnants
 .venv/bin/python -m src.embed    --verify-only   # shape, finiteness, unit norm
 .venv/bin/python -m src.manifold --verify-only   # grid, anchors, objective ranges
 .venv/bin/python -m src.pareto   --verify-only   # dominance, ranking, archetypes
@@ -259,6 +346,20 @@ The dashboard check confirms there is no local asset path, no `fetch()` or
 `XMLHttpRequest`, and that the embedded `#1` prompt is byte-identical to
 `output/KMO_PROMPT_TOP1.txt`. The Node harness executes the page's own inline
 script against the real payload under a minimal DOM shim: it asserts 120 papers
-across 3 regimes, 33 clickable gaps, 4 hidden 21x21 field layers, the field
+across 3 regimes, the payload's own gap count, 4 hidden 21x21 field layers, the field
 orientation, the closed 4-axis radar, the 5 anchor links, gap stepping, the
-click handler, and that a layer toggle keeps every marker trace visible.
+click handler, and that a layer toggle keeps every marker trace visible. The
+harness reads expected counts and coordinates out of the embedded payload rather
+than hard-coding them, so a corpus change does not silently invalidate it.
+
+The audit has no `--verify-only` because there is nothing to re-verify offline:
+it scores a document that does not exist until someone runs the prompt. Its
+behaviour is pinned by `tests/test_audit.py` instead, which drives all eight
+checks through both directions — a compliant answer passes all eight, and each
+violation is caught by the item that owns it.
+
+`pytest` covers what is expensive to get wrong and cheap to check: the 68
+sanitiser cases, the n-gram matrix and word index, the eight Appendix A.2 checks,
+and the equations that invite a plausible-but-wrong implementation (the Eq. 21
+worked example, the `q60 <= d_nn <= q85` plateau, and the central-difference
+gradient).

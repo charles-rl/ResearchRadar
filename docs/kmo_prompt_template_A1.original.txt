@@ -1,0 +1,57 @@
+You are participating in a controlled experiment.  A deterministic 
+pipeline has analyzed a corpus of papers and exported a machine-computed 
+**evidence package** for one location on its knowledge map — the attached 
+`evidence_point_<x>_<y>.json`, as produced by `code/make_evidence.py`. 
+No real paper occupies that location.  Your task is to write the 
+**virtual document**: a description of the research that *would* occupy 
+it. 
+
+Evidence terms are **whole words**, deterministically reconstructed from 
+the corpus text (each entry lists its attested `word_forms`).  No 
+fragment decoding is needed. 
+
+The package contains: 
+- `theme_lens_L2` — words indicating the local research theme. 
+- `concentration_lens_L1` — words whose probability mass is locally 
+  concentrated; each carries `df`, the number of corpus documents 
+  containing the word, and, where `df <= 3`, its `source_docs`. 
+- `contributing_documents_top3` — the highest-weighted neighboring 
+  papers (titles and weights). 
+- `mixture_entropy_H`, `effective_contributing_documents`, 
+  `relative_uncertainty_u` — how broad and how well-supported the 
+  location is. 
+
+Rules (binding) 
+1. **Theme from the theme lens.**  Build the consensus research theme 
+   from the L2 words and the contributing documents.  Words appearing 
+   in BOTH lens lists carry the greatest weight.  Titles of 
+   contributing documents may help you interpret the words, but the 
+   description must not be a paraphrase of those titles. 
+2. **Serendipity from the concentration lens, graded by df.**  Words 
+   appearing only in the L1 list are candidates for speculative 
+   additions.  If `df >= 4`: you may present the word as an emergent 
+   shared topic.  If `df <= 3`: you may mention it ONLY as a 
+   single-source hypothesis, explicitly citing its `source_docs` 
+   (e.g. "as explored in only one neighboring study [doc 18]"). 
+   Never present a `df <= 3` word as established regional knowledge. 
+3. **No outside facts.**  Do not assert anything the evidence package 
+   does not support.  Your general knowledge of composites may be used 
+   to connect the evidence into fluent prose, not to add claims absent 
+   from it. 
+4. **Use every listed word or account for it.**  All terms in the 
+   package are corpus words that survived a noise filter; none is a 
+   bibliographic fragment.  If you nevertheless judge a term 
+   unusable, say so explicitly in one line rather than silently 
+   dropping it. 
+5. **Close with the evidence list.**  End your answer with a section 
+   `Evidence used:` listing every word you relied on, each with its 
+   df, plus any term you set aside under Rule 4. 
+
+Deliverables 
+- **Task A**: the virtual document, in English, 200–280 words, 
+  structured as a research abstract (topic, approach, expected 
+  contribution).  Include a one-line caveat reflecting 
+  `relative_uncertainty_u` and `effective_contributing_documents`. 
+- **Task B**: a 45-word summary of the same virtual document. 
+Output Task A, then Task B, then the `Evidence used:` list.  Do not 
+include anything else — no reasoning trace, no extra sections. 

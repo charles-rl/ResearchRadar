@@ -220,13 +220,14 @@ def build_payload(
     grid_data: dict[str, Any],
     front: dict[str, Any],
     template: str,
+    paths: Paths,
 ) -> dict[str, Any]:
     """Assemble the full JSON bundle embedded in the page."""
     metadata = front["metadata"]
     names = [str(name) for name in metadata["objective_names"]]
     grid_size = round(int(metadata["candidates"]) ** 0.5)
 
-    _, packages = build_gap_packages(corpus, grid_data, front, config)
+    _, packages = build_gap_packages(corpus, grid_data, front, config, paths)
     gaps = gap_records(front, packages, template)
 
     axis = np.round(
@@ -321,7 +322,9 @@ def render_dashboard(config: dict[str, Any], paths: Paths, template_path: Path) 
     prompt_template = prompt_template_path.read_text(encoding="utf-8")
 
     corpus, grid_data, front = load_inputs(paths)
-    payload = build_payload(config, corpus, grid_data, front, prompt_template)
+    payload = build_payload(
+        config, corpus, grid_data, front, prompt_template, paths
+    )
 
     document = template.replace(PLACEHOLDER, encode_payload(payload))
     paths.dashboard.parent.mkdir(parents=True, exist_ok=True)

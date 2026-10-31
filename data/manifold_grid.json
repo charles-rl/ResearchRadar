@@ -4,20 +4,20 @@
   "documents": 120,
   "spacing": 0.1,
   "sph_h_global": 0.25,
-  "nearest_k": 8,
-  "stress": 204.68589564853573,
-  "distance_correlation": 0.8658298198886984,
+  "nearest_k_adaptive": 8,
+  "stress": 610.7773165568947,
+  "distance_correlation": 0.6038977739495592,
   "anchors": {
     "indices": [
-      17,
-      10,
-      50,
-      64,
-      68,
-      113,
-      37,
-      5,
-      22
+      98,
+      56,
+      101,
+      11,
+      18,
+      36,
+      74,
+      86,
+      16
     ],
     "targets": [
       [
@@ -58,10 +58,28 @@
       ]
     ]
   },
+  "boundary_views": [
+    {
+      "name": "k5_global",
+      "k": 5,
+      "scheme": "global"
+    },
+    {
+      "name": "k8_global",
+      "k": 8,
+      "scheme": "global"
+    },
+    {
+      "name": "k8_adaptive",
+      "k": 8,
+      "scheme": "adaptive"
+    }
+  ],
+  "persistent_boundary": "harmonic mean of b_k5_global, b_k8_global, b_k8_adaptive",
   "whitespace_quantiles": {
-    "q20": 0.07071477498923637,
-    "q60": 0.21540659228538012,
-    "q85": 0.32310988842807026,
+    "q20": 0.05106589862019921,
+    "q60": 0.16633598070843938,
+    "q85": 0.31048349392520047,
     "q98": 0.42936545386398967
   },
   "objective_names": [
@@ -69,5 +87,64 @@
     "W",
     "G",
     "S"
-  ]
+  ],
+  "kernel_agreement": 0.8948620229872081,
+  "baseline": {
+    "reference": "Obayashi et al. (2026) Table 4",
+    "count": 16,
+    "all_grid": {
+      "d_nn": 0.4402,
+      "S": 0.064,
+      "R": 0.0176,
+      "P_boundary": 0.0399,
+      "G": 0.2363,
+      "points_on_chart_edge": 16
+    },
+    "interior_only": {
+      "d_nn": 0.3364,
+      "S": 0.2905,
+      "R": 0.3026,
+      "P_boundary": 0.2714,
+      "G": 0.5842,
+      "points_on_chart_edge": 0
+    },
+    "all_grid_indices": [
+      440,
+      20,
+      0,
+      420,
+      19,
+      419,
+      439,
+      41,
+      21,
+      421,
+      399,
+      1,
+      294,
+      434,
+      14,
+      314
+    ],
+    "interior_only_indices": [
+      405,
+      313,
+      35,
+      27,
+      413,
+      295,
+      418,
+      40,
+      400,
+      22,
+      145,
+      274,
+      28,
+      412,
+      292,
+      166
+    ],
+    "interior_candidates": 361,
+    "notes": "Columns are mean values over the selected points. R is the averaged dual-kernel reliability diagnostic and is not a Pareto objective."
+  }
 }

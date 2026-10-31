@@ -24,6 +24,9 @@ class Paths:
 
     config_dir: Path
     corpus: Path
+    corpus_fulltext: Path
+    tfidf_matrix: Path
+    tfidf_vocab: Path
     embeddings: Path
     grid_npz: Path
     pareto_json: Path
@@ -31,6 +34,8 @@ class Paths:
     report: Path
     dashboard: Path
     dashboard_template: Path
+    prompt_payload: Path
+    prompt_template: Path
 
 
 def configure_logging(level: str = "INFO") -> None:
@@ -66,6 +71,8 @@ def resolve_paths(config: dict[str, Any], config_path: Path) -> Paths:
     """Resolve every artifact path relative to the config file's directory."""
     config_dir = config_path.parent if str(config_path.parent) else Path(".")
     corpus_cfg = config.get("corpus", {})
+    fulltext_cfg = config.get("fulltext", {})
+    tfidf_cfg = config.get("tfidf", {})
     ollama_cfg = config.get("ollama", {})
     manifold_cfg = config.get("manifold", {})
     pareto_cfg = config.get("pareto", {})
@@ -74,6 +81,12 @@ def resolve_paths(config: dict[str, Any], config_path: Path) -> Paths:
     return Paths(
         config_dir=config_dir,
         corpus=config_dir / str(corpus_cfg.get("output_path", "data/corpus.json")),
+        corpus_fulltext=config_dir
+        / str(fulltext_cfg.get("output_path", "data/corpus_fulltext.json")),
+        tfidf_matrix=config_dir
+        / str(tfidf_cfg.get("matrix_path", "data/sparse_tfidf.npz")),
+        tfidf_vocab=config_dir
+        / str(tfidf_cfg.get("vocab_path", "data/tfidf_vocab.json")),
         embeddings=config_dir
         / str(ollama_cfg.get("embeddings_cache", "data/embeddings.npy")),
         grid_npz=config_dir
@@ -89,4 +102,8 @@ def resolve_paths(config: dict[str, Any], config_path: Path) -> Paths:
         / str(
             output_cfg.get("dashboard_template", "templates/dashboard.html")
         ),
+        prompt_payload=config_dir
+        / str(output_cfg.get("prompt_path", "output/KMO_PROMPT_TOP1.txt")),
+        prompt_template=config_dir
+        / str(output_cfg.get("prompt_template", "docs/kmo_prompt_template_A1.txt")),
     )

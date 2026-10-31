@@ -1,83 +1,130 @@
-"""Knowledge Manifold construction and the four KMO discovery fields.
+"""Phase 3: fixed Knowledge Manifold and the four discovery fields.
 
-Implements PLAN.md Phase 4 for Obayashi et al. (2026), "Knowledge Manifold
-Optimization":
+Reproduces Obayashi et al. (2026) Sections 3.1-3.7, 4.2, 4.3 and 5.2-5.5.
 
-* Section 2.1 / 5.2 - a fixed bounded chart ``Omega = [-1, 1]^2``. Nine
-  automatically selected anchor documents (eight perimeter, one central) fix the
-  coordinate gauge; the remaining documents are placed by constrained stress
-  minimization seeded with classical MDS. Coordinates are then frozen.
-* Section 3.3 - knowledge-regime boundary field ``B_K`` from normalized cluster
-  entropy ``H_K`` and the dominant-second probability gap ``Dp_K``.
-* Section 4.2 - persistent boundary objective ``P_boundary`` as the harmonic mean
-  of the global and adaptive boundary strengths.
-* Section 3.4 - band-pass white-space novelty ``W`` over nearest-document
-  distance quantiles ``q20 < q60 <= q85 < q98``.
-* Section 3.5 - knowledge-gradient field ``G`` from the Frobenius norm of the
-  semantic field Jacobian, computed by central differences.
-* Section 3.6 - evidential support ``S`` from inverse Simpson ``N_eff``, the
-  fifth-nearest document distance ``d5``, and top-three weight mass ``T3``.
-* Section 3.7 - Gaussian-process relative uncertainty ``u``, retained as a
-  reliability diagnostic (not a Pareto objective, per Section 4.3).
-* Section 5.5 - a 21 x 21 evaluation grid, i.e. 441 candidates at spacing 0.1.
-* Equations 9-10 - ``N_+``/``N_-`` percentile normalization at the 10th/90th
-  percentiles.
+The structure is:
 
-The whitened vector seeds in ``_RNG`` are not used for any field; every value is
-deterministic given the corpus and embeddings.
+1. Documents have fixed coordinates ``x_i`` on a bounded, gauge-fixed chart
+   ``Omega = [-1, 1]^2`` (nine anchors: eight perimeter, one central; the
+   remaining documents placed by constrained stress minimisation initialised by
+   classical MDS, then frozen).
+2. A 21 x 21 regular grid gives 441 candidate locations at spacing 0.1.
+3. Four competing objectives are evaluated on the grid. ``P_boundary`` is the
+   harmonic mean of *three* boundary-strength views (K=5 global, K=8 global,
+   K=8 adaptive), because boundary evidence must persist across clustering
+   resolutions and smoothing scales; ``W`` is a band-pass white-space novelty
+   term; ``G`` is the semantic gradient of the interpolated field; ``S`` is
+   evidential support. ``R`` is computed but is a diagnostic, not an objective.
 
-Usage
------
-    python -m src.manifold
-    python -m src.manifold --verify-only
+Two implementation notes that matter for fidelity:
+
+``P_boundary`` is a harmonic mean of three views, not a weighted sum
+    A weighted sum lets one strong view compensate for a weak one. The harmonic
+    mean is AND-like: any view near zero drags the whole score down, which is
+    the intended semantics (Section 4.2).
+
+``G`` is central differences of `v` itself, taken through the Gram matrix
+    ``v(x) = normalize(sum_i w_i(x) z_i)`` lives in a 250,000-dimensional space,
+    so materialising it for 441 grid points would need ~880 MB. The Jacobian
+    norm only needs *inner products between normalised field values*, and those
+    collapse onto the ``N x N`` Gram matrix ``K = Z Z^T``. With unnormalised
+    ``A_i = Z^T w_i`` and ``n_i = ||A_i||``:
+
+        cos(v_a, v_b) = (w_a^T K w_b) / (n_a n_b)
+
+    so the central-difference estimate
+
+        ||dv/dx|| = ||v(x + dx) - v(x - dx)|| / (2 dx)
+
+    becomes ``sqrt(2 - 2 cos(v_+, v_-)) / (2 dx)``, which is the *same estimator*
+    - literal central differences between neighbouring field values, not a
+    first-order projection - evaluated exactly at Gram cost. Deriving it as
+    ``(I - v v^T) dA/dx / ||A||`` instead would be only first-order accurate and
+    drifts by several tens of percent wherever the field turns sharply.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import scipy.sparse as sp
 from numpy.typing import NDArray
 
-from .common import LOGGER, Paths, configure_logging, load_config, resolve_paths
+from src.common import (
+    LOGGER,
+    Paths,
+    configure_logging,
+    load_config,
+    resolve_paths,
+)
+from src.embed import Representation, load_representation
 
 DEFAULT_CONFIG = Path("config.yaml")
 OBJECTIVE_NAMES = ("P_boundary", "W", "G", "S")
 
-# Obayashi et al. Eq. 11 weights.
+#: Section 3.3: boundary strength puts 0.65 on normalized entropy (the primary
+#: mixture measure) and 0.35 on the dominant-second gap.
 ENTROPY_WEIGHT = 0.65
 GAP_WEIGHT = 0.35
-# Obayashi et al. Eq. 18 weights.
+
+#: Section 3.6 support weights.
 SUPPORT_W_NEFF = 0.40
 SUPPORT_W_D5 = 0.30
 SUPPORT_W_T3 = 0.30
 
+#: Section 3.2: the three views whose boundary strength must persist.
+#: (name, cluster count K, smoothing scheme)
+VIEW_SPECS = (
+    ("k5_global", 5, "global"),
+    ("k8_global", 8, "global"),
+    ("k8_adaptive", 8, "adaptive"),
+)
+
+#: Section 5.2: nine anchors, eight on the perimeter plus one central.
+ANCHOR_RADIUS = 0.92
+
+#: Guards a division-by-zero in the SPH kernel when two documents coincide.
+MIN_BANDWIDTH = 1e-6
+
 
 @dataclass
 class Manifold:
-    """Frozen document coordinates plus chart metadata."""
+    """Frozen document coordinates plus chart and clustering metadata."""
 
     coords: NDArray[np.float64]
     anchor_index: NDArray[np.int64]
     anchor_target: NDArray[np.float64]
     stress: float
     distance_correlation: float
+    labels: dict[int, NDArray[np.int64]]
 
 
 # --------------------------------------------------------------------------- #
 # Document coordinates: MDS + gauge-fixing anchors + constrained stress
 # --------------------------------------------------------------------------- #
-def cosine_distance_matrix(embeddings: NDArray[np.float32]) -> NDArray[np.float64]:
-    """Return the pairwise cosine distance matrix of unit-norm rows."""
-    unit = embeddings.astype(np.float64)
-    norms = np.linalg.norm(unit, axis=1, keepdims=True)
-    unit = unit / np.where(norms <= 0.0, 1.0, norms)
-    similarity = unit @ unit.T
-    return np.clip(1.0 - similarity, 0.0, 2.0)
+def gram_matrix(z_l2: sp.spmatrix) -> NDArray[np.float64]:
+    """``K = Z Z^T``, i.e. cosine similarity for L2-normalised rows.
+
+    Also the whole of the semantic geometry: inner products of document vectors
+    are all the gradient objective needs.
+    """
+    matrix = sp.csr_matrix(z_l2)
+    product = sp.csr_matrix(matrix @ matrix.transpose())
+    similarity = np.asarray(product.toarray(), dtype=np.float64)
+    return np.clip(similarity, -1.0, 1.0)
+
+
+def cosine_distance_matrix(gram: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Cosine distance ``D_ij = 1 - K_ij``, clipped to ``[0, 2]``."""
+    distances = np.clip(1.0 - gram, 0.0, 2.0)
+    np.fill_diagonal(distances, 0.0)
+    return distances
 
 
 def classical_mds(
@@ -137,9 +184,9 @@ def select_anchors(
                 break
 
     anchor_index = np.array(chosen + [central], dtype=np.int64)
-    radius = 0.92
     targets = [
-        [radius * np.cos(angle), radius * np.sin(angle)] for angle in angles
+        [ANCHOR_RADIUS * np.cos(angle), ANCHOR_RADIUS * np.sin(angle)]
+        for angle in angles
     ]
     targets.append([0.0, 0.0])
     return anchor_index, np.array(targets, dtype=np.float64)
@@ -152,12 +199,12 @@ def constrained_stress(
     anchor_target: NDArray[np.float64],
     bounds: tuple[float, float] = (-1.0, 1.0),
     max_iterations: int = 800,
-) -> Manifold:
+) -> tuple[NDArray[np.float64], float, float]:
     """Minimize metric stress with the anchor coordinates pinned.
 
-    Stress is ``sum_{i<j} (||x_i - x_j|| - D_ij)^2`` over all document pairs, with
-    the nine anchors held at their gauge-fixing targets. The free coordinates are
-    bounded to the chart so no document leaves ``[-1, 1]^2``.
+    Stress is ``0.5 * sum_{i<j} (||x_i - x_j|| - D_ij)^2``, with the nine anchors
+    held at their gauge-fixing targets and every free coordinate bounded to the
+    chart so no document leaves ``[-1, 1]^2``.
     """
     from scipy.optimize import minimize
 
@@ -181,9 +228,9 @@ def constrained_stress(
         residual = dist - distances
         stress = 0.5 * float(np.sum(residual**2))
 
-        # d/dx_i of sum_{i<j} r_ij^2 = 2 * sum_{j!=i} r_ij (x_i - x_j)/d_ij
+        # d/dx_i of 0.5 * sum_{i<j} r_ij^2 = sum_{j!=i} r_ij (x_i - x_j)/d_ij
         coefficient = np.where(dist <= 1e-12, 0.0, residual / safe)
-        gradient_full = 2.0 * np.einsum("ij,ijk->ik", coefficient, delta)
+        gradient_full = np.einsum("ij,ijk->ik", coefficient, delta)
         gradient_full[anchor_index] = 0.0
         return stress, gradient_full[free].ravel()
 
@@ -200,9 +247,7 @@ def constrained_stress(
     final = unpack(result.x)
 
     pair_mask = np.triu(np.ones((n, n), dtype=bool), k=1)
-    final_dist = np.linalg.norm(
-        final[:, None, :] - final[None, :, :], axis=-1
-    )
+    final_dist = np.linalg.norm(final[:, None, :] - final[None, :, :], axis=-1)
     original = distances[pair_mask]
     embedded = final_dist[pair_mask]
     # Shepard-style agreement between embedding and true distances.
@@ -219,43 +264,70 @@ def constrained_stress(
         bool(result.success),
         int(result.nit),
     )
-    return Manifold(
-        coords=final,
-        anchor_index=anchor_index,
-        anchor_target=anchor_target,
-        stress=float(result.fun),
-        distance_correlation=corr,
+    return final, float(result.fun), corr
+
+
+def cluster_labels(z_l2: sp.spmatrix, k: int) -> NDArray[np.int64]:
+    """K-means partition of the documents at resolution ``K`` (Section 3.2).
+
+    Labels carry no meaning across resolutions; only the scalar boundary
+    measures computed from them are comparable (Section 3.2).
+    """
+    from sklearn.cluster import KMeans
+
+    n_documents = z_l2.get_shape()[0]
+    if k >= n_documents:
+        raise SystemExit(
+            f"Cannot cluster {n_documents} documents into K={k}; K must be smaller"
+        )
+    model = KMeans(n_clusters=k, n_init=10, random_state=0)  # type: ignore[arg-type]
+    labels = np.asarray(model.fit_predict(sp.csr_matrix(z_l2)), dtype=np.int64)
+    counts = np.bincount(labels, minlength=k)
+    inertia = model.inertia_
+    LOGGER.info(
+        "K=%d clustering: sizes %s (inertia %s)",
+        k,
+        ", ".join(str(int(value)) for value in counts),
+        "n/a" if inertia is None else f"{float(inertia):.4f}",
     )
+    return labels
 
 
 def build_manifold(
-    embeddings: NDArray[np.float32], config: dict[str, Any]
+    gram: NDArray[np.float64], config: dict[str, Any]
 ) -> Manifold:
-    """Construct the frozen Knowledge Manifold for the corpus."""
+    """Construct the frozen Knowledge Manifold, including the K=5 and K=8 views."""
     manifold_cfg = config.get("manifold", {})
     n_perimeter = int(manifold_cfg.get("perimeter_anchors", 8))
     bounds_cfg = manifold_cfg.get("bounds", [-1.0, 1.0])
     bounds = (float(bounds_cfg[0]), float(bounds_cfg[1]))
 
-    distances = cosine_distance_matrix(embeddings)
+    distances = cosine_distance_matrix(gram)
     init = _scale_to_chart(classical_mds(distances, n_components=2))
     anchor_index, anchor_target = select_anchors(init, n_perimeter=n_perimeter)
-    manifold = constrained_stress(
+    coords, stress, correlation = constrained_stress(
         distances, init, anchor_index, anchor_target, bounds=bounds
     )
 
     LOGGER.info(
         "Manifold: %d documents on [%.2f, %.2f]^2, bounds x=[%.3f, %.3f] "
         "y=[%.3f, %.3f]",
-        manifold.coords.shape[0],
+        coords.shape[0],
         bounds[0],
         bounds[1],
-        manifold.coords[:, 0].min(),
-        manifold.coords[:, 0].max(),
-        manifold.coords[:, 1].min(),
-        manifold.coords[:, 1].max(),
+        coords[:, 0].min(),
+        coords[:, 0].max(),
+        coords[:, 1].min(),
+        coords[:, 1].max(),
     )
-    return manifold
+    return Manifold(
+        coords=coords,
+        anchor_index=anchor_index,
+        anchor_target=anchor_target,
+        stress=stress,
+        distance_correlation=correlation,
+        labels={},
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -282,28 +354,45 @@ def pairwise_distances(
 def sph_weights(
     grid: NDArray[np.float64],
     coords: NDArray[np.float64],
-    bandwidth: NDArray[np.float64] | float,
+    bandwidth: float,
 ) -> NDArray[np.float64]:
-    """SPH kernel weights ``exp(-||x - x_i||^2 / (2 h^2))``.
+    """Global SPH kernel weights ``exp(-||x - x_i||^2 / (2 h^2))``.
 
-    ``bandwidth`` may be a scalar (global field) or one value per grid point
-    (adaptive field).
+    ``bandwidth`` is one smoothing scale over the full map (Section 5.4).
     """
     squared = pairwise_distances(grid, coords) ** 2
-    h = np.asarray(bandwidth, dtype=np.float64)
-    if h.ndim == 0:
-        return np.exp(-squared / (2.0 * float(h) ** 2))
-    return np.exp(-squared / (2.0 * h[:, None] ** 2))
+    return np.exp(-squared / (2.0 * float(bandwidth) ** 2))
 
 
-def adaptive_bandwidth(
-    grid: NDArray[np.float64], coords: NDArray[np.float64], nearest_k: int
+def sph_weights_adaptive(
+    grid: NDArray[np.float64],
+    coords: NDArray[np.float64],
+    document_bandwidth: NDArray[np.float64],
 ) -> NDArray[np.float64]:
-    """Local scale: mean distance to the ``nearest_k`` nearest documents."""
-    distances = pairwise_distances(grid, coords)
-    k = min(max(1, nearest_k), distances.shape[1])
-    nearest = np.partition(distances, k - 1, axis=1)[:, :k]
-    return np.maximum(nearest.mean(axis=1), 1e-6)
+    """Adaptive SPH weights with one smoothing length ``h_i`` per document.
+
+    ``w_i(x) = exp(-||x - x_i||^2 / (2 h_i^2))``, the standard adaptive SPH
+    kernel: a document in a sparse neighbourhood smooths over a longer scale.
+    """
+    squared = pairwise_distances(grid, coords) ** 2
+    h = np.maximum(np.asarray(document_bandwidth, dtype=np.float64), MIN_BANDWIDTH)
+    return np.exp(-squared / (2.0 * h[None, :] ** 2))
+
+
+def document_bandwidth(
+    coords: NDArray[np.float64], nearest_k: int = 8
+) -> NDArray[np.float64]:
+    """Per-document smoothing length: distance to the ``nearest_k``-th neighbour.
+
+    Section 5.4: "the adaptive field used a local scale based on the eight
+    nearest documents". ``nearest_k`` counts the document itself as neighbour
+    zero, so ``k=8`` is the 8th nearest other document.
+    """
+    distances = pairwise_distances(coords, coords)
+    np.fill_diagonal(distances, np.inf)
+    k = min(max(1, nearest_k), distances.shape[1] - 1)
+    ordered = np.sort(distances, axis=1)
+    return np.maximum(ordered[:, k - 1], MIN_BANDWIDTH)
 
 
 def normalize_percentile(
@@ -318,16 +407,16 @@ def normalize_percentile(
     return np.clip((values - p_low) / span, 0.0, 1.0), (p_low, p_high)
 
 
-def regime_mixture(
-    weights: NDArray[np.float64], regimes: NDArray[np.int64], n_regimes: int
+def normalized_mixture(
+    weights: NDArray[np.float64], labels: NDArray[np.int64], n_clusters: int
 ) -> NDArray[np.float64]:
-    """Normalized regime probability vector for each grid point (Eq. 6)."""
+    """Normalized cluster probability vector for each grid point (Eq. 6)."""
     totals = weights.sum(axis=1, keepdims=True)
     totals = np.where(totals <= 1e-300, 1.0, totals)
     normalized = weights / totals
-    mixture = np.zeros((weights.shape[0], n_regimes), dtype=np.float64)
-    for regime in range(n_regimes):
-        mixture[:, regime] = normalized[:, regimes == regime].sum(axis=1)
+    mixture = np.zeros((weights.shape[0], n_clusters), dtype=np.float64)
+    for cluster in range(n_clusters):
+        mixture[:, cluster] = normalized[:, labels == cluster].sum(axis=1)
     return mixture
 
 
@@ -335,13 +424,35 @@ def boundary_strength(
     mixture: NDArray[np.float64],
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Return raw normalized entropy ``H_K`` and dominant-second gap ``Dp_K``."""
-    n_regimes = mixture.shape[1]
+    n_clusters = mixture.shape[1]
     safe = np.clip(mixture, 1e-12, None)
-    entropy = -(mixture * np.log(safe)).sum(axis=1) / np.log(n_regimes)
+    entropy = -(mixture * np.log(safe)).sum(axis=1) / np.log(n_clusters)
     entropy = np.clip(entropy, 0.0, 1.0)
     ordered = np.sort(mixture, axis=1)
     gap = ordered[:, -1] - ordered[:, -2]
     return entropy, gap
+
+
+def boundary_score(entropy: NDArray[np.float64], gap: NDArray[np.float64]) -> NDArray[np.float64]:
+    """``B_K = 0.65 N_+(H_K) + 0.35 N_-(Dp_K)`` (Eq. 11)."""
+    normalized_entropy, _ = normalize_percentile(entropy)
+    normalized_gap, _ = normalize_percentile(gap)
+    return ENTROPY_WEIGHT * normalized_entropy + GAP_WEIGHT * (1.0 - normalized_gap)
+
+
+def persistent_boundary(views: dict[str, NDArray[np.float64]]) -> NDArray[np.float64]:
+    """Harmonic mean of the three boundary views (Eq. 21).
+
+    ``P = 3 / (1/B_5g + 1/B_8g + 1/B_8a)``. A zero in any view makes the
+    reciprocal infinite and the score zero, which is the AND-like behaviour the
+    paper argues for in Section 4.2.
+    """
+    ordered = [views[name] for name, _, _ in VIEW_SPECS]
+    stack = np.column_stack(ordered)
+    positive = stack > 0.0
+    reciprocals = np.where(positive, 1.0 / np.where(positive, stack, 1.0), np.inf)
+    total = reciprocals.sum(axis=1)
+    return np.where(np.isfinite(total), len(ordered) / np.where(np.isfinite(total), total, 1.0), 0.0)
 
 
 def band_pass_whitespace(
@@ -368,11 +479,10 @@ def empirical_dnn_quantiles(
 ) -> dict[str, float]:
     """Take ``d_nn`` quantiles over the candidate domain (Section 5.5).
 
-    The paper defines these empirically over the search grid. The values recorded
-    in ``config.yaml`` come from the paper's aerodynamic corpus and are kept as a
-    documented reference; with ``use_empirical_quantiles: true`` (the default) the
-    quantiles are recomputed for this corpus so the band-pass window matches its
-    own sampling density.
+    The paper defines these over its own search grid. ``config.yaml`` records the
+    published values as a reference; with ``use_empirical_quantiles: true`` (the
+    default) they are recomputed for this corpus so the band-pass window matches
+    its own sampling density instead of the aerodynamic corpus's scale.
     """
     manifold_cfg = config.get("manifold", {})
     configured = manifold_cfg.get("q_whitespace", {}) or {}
@@ -382,56 +492,106 @@ def empirical_dnn_quantiles(
         "q85": float(np.percentile(d_nn, 85)),
         "q98": float(np.percentile(d_nn, 98)),
     }
-    if bool(manifold_cfg.get("use_empirical_quantiles", True)):
-        LOGGER.info(
-            "d_nn quantiles (empirical): q20=%.4f q60=%.4f q85=%.4f q98=%.4f",
-            empirical["q20"],
-            empirical["q60"],
-            empirical["q85"],
-            empirical["q98"],
-        )
-        if configured:
-            LOGGER.info(
-                "d_nn quantiles (config reference, paper corpus): "
-                "q20=%.4f q60=%.4f q85=%.4f q98=%.4f",
-                float(configured.get("q20", 0.0)),
-                float(configured.get("q60", 0.0)),
-                float(configured.get("q85", 0.0)),
-                float(configured.get("q98", 0.0)),
-            )
-        return empirical
-
-    merged = dict(empirical)
-    merged.update({key: float(value) for key, value in configured.items()})
     LOGGER.info(
-        "d_nn quantiles (config): q20=%.4f q60=%.4f q85=%.4f q98=%.4f",
-        merged["q20"],
-        merged["q60"],
-        merged["q85"],
-        merged["q98"],
+        "d_nn quantiles (empirical): q20=%.4f q60=%.4f q85=%.4f q98=%.4f",
+        empirical["q20"],
+        empirical["q60"],
+        empirical["q85"],
+        empirical["q98"],
     )
-    return merged
+    if configured:
+        LOGGER.info(
+            "d_nn quantiles (published, different corpus): q20=%.4f q60=%.4f "
+            "q85=%.4f q98=%.4f",
+            float(configured.get("q20", 0.0)),
+            float(configured.get("q60", 0.0)),
+            float(configured.get("q85", 0.0)),
+            float(configured.get("q98", 0.0)),
+        )
+    if bool(manifold_cfg.get("use_empirical_quantiles", True)):
+        return empirical
+    return {
+        key: float(configured.get(key, empirical[key]))
+        for key in ("q20", "q60", "q85", "q98")
+    }
 
 
-def semantic_field(
-    weights: NDArray[np.float64], embeddings: NDArray[np.float32]
+def _difference_pairs(grid_size: int) -> tuple[NDArray[np.int64], NDArray[np.int64], NDArray[np.float64]]:
+    """Neighbour pairs and divisors matching ``np.gradient``'s conventions.
+
+    Interior points use the central three-point stencil; the two edge points use
+    a one-sided difference, exactly as ``np.gradient`` does, so the estimator is
+    directly comparable with a dense finite-difference implementation.
+    """
+    low: list[int] = []
+    high: list[int] = []
+    divisor: list[float] = []
+    for index in range(grid_size):
+        if index == 0:
+            low.append(0)
+            high.append(1)
+            divisor.append(1.0)
+        elif index == grid_size - 1:
+            low.append(grid_size - 2)
+            high.append(grid_size - 1)
+            divisor.append(1.0)
+        else:
+            low.append(index - 1)
+            high.append(index + 1)
+            divisor.append(2.0)
+    return (
+        np.array(low, dtype=np.int64),
+        np.array(high, dtype=np.int64),
+        np.array(divisor, dtype=np.float64),
+    )
+
+
+def semantic_gradient(
+    weights: NDArray[np.float64],
+    gram: NDArray[np.float64],
+    grid_size: int,
+    spacing: float,
 ) -> NDArray[np.float64]:
-    """Interpolated semantic field ``v(x) = sum_i w_i v_i / sum_i w_i``."""
-    totals = weights.sum(axis=1, keepdims=True)
-    totals = np.where(totals <= 1e-300, 1.0, totals)
-    return (weights / totals) @ embeddings.astype(np.float64)
+    """Raw Jacobian Frobenius norm ``g(x) = ||J_v(x)||_F`` (Eqs. 13-14).
 
+    Central differences of the *normalised* interpolated field, evaluated from
+    pairwise inner products so the 250,000-dimensional field is never built.
+    Rows of ``weights`` follow the ``x``-major grid layout, so the index grid
+    below has axis 0 = x and axis 1 = y.
+    """
+    n_points = grid_size * grid_size
+    if weights.shape[0] != n_points:
+        raise ValueError(
+            f"weights has {weights.shape[0]} rows but the grid has {n_points} points"
+        )
 
-def gradient_magnitude(
-    field: NDArray[np.float64], size: int, spacing: float
-) -> NDArray[np.float64]:
-    """Frobenius norm of the field Jacobian by central differences (Eq. 14)."""
-    cube = field.reshape(size, size, -1)
-    grad_x, grad_y = np.gradient(cube, spacing, spacing, axis=(0, 1))  # type: ignore[misc]
-    d_dx = np.asarray(grad_x, dtype=np.float64)
-    d_dy = np.asarray(grad_y, dtype=np.float64)
-    squared = (d_dx**2).sum(axis=-1) + (d_dy**2).sum(axis=-1)
-    return np.sqrt(squared).ravel()
+    projected = weights @ gram
+    norm = np.sqrt(np.maximum(np.einsum("mi,mi->m", weights, projected), 0.0))
+    index_grid = np.arange(n_points).reshape(grid_size, grid_size)
+
+    low, high, divisor = _difference_pairs(grid_size)
+    total = np.zeros(n_points, dtype=np.float64)
+    for axis in range(2):
+        for position in range(grid_size):
+            if axis == 0:
+                low_index = index_grid[low[position], :]
+                high_index = index_grid[high[position], :]
+                target = index_grid[position, :]
+            else:
+                low_index = index_grid[:, low[position]]
+                high_index = index_grid[:, high[position]]
+                target = index_grid[:, position]
+
+            # cos(v_a, v_b) = w_a^T K w_b / (n_a n_b), and ||v_a - v_b||^2 =
+            # 2 - 2 cos(v_a, v_b), so this is the plain central difference of the
+            # normalised field, taken between real neighbouring grid values.
+            inner = np.einsum("mi,mi->m", projected[low_index], weights[high_index])
+            scale = norm[low_index] * norm[high_index]
+            scale = np.where(scale <= 0.0, 1.0, scale)
+            cosine = np.clip(inner / scale, -1.0, 1.0)
+            step = (float(divisor[position]) * spacing) ** 2
+            total[target] += np.maximum(2.0 - 2.0 * cosine, 0.0) / step
+    return np.sqrt(total)
 
 
 def support_statistics(
@@ -457,17 +617,17 @@ def support_statistics(
 
 
 def gpr_uncertainty(
-    embeddings: NDArray[np.float32],
+    z_l2: sp.spmatrix,
     grid: NDArray[np.float64],
     coords: NDArray[np.float64],
     n_components: int = 10,
 ) -> dict[str, NDArray[np.float64]]:
     """Relative uncertainty from two GPR surrogates (Section 3.7, Eq. 19).
 
-    A Gaussian process is fitted on a PCA reduction of the document embeddings
-    and its predictive standard deviation is evaluated on the grid. As in the
-    paper, two covariance assumptions are used - an anisotropic-baseline RBF and
-    a Matern-3/2 - and their low-uncertainty scores are averaged into ``R``.
+    A Gaussian process is fitted on a truncated-SVD reduction of the L2
+    representation and its predictive standard deviation is evaluated on the
+    grid. Two covariance assumptions are used - an anisotropic-baseline RBF and a
+    Matern-3/2 - and their low-uncertainty scores are averaged into ``R``.
 
     Hyperparameters are held fixed at a data-derived length scale instead of
     being optimized. Letting the marginal likelihood choose the length scale
@@ -481,7 +641,7 @@ def gpr_uncertainty(
     Pareto objectives (Section 4.3): maximizing low uncertainty would favour
     densely sampled regions and suppress frontier exploration.
     """
-    from sklearn.decomposition import PCA
+    from sklearn.decomposition import TruncatedSVD
     from sklearn.gaussian_process import GaussianProcessRegressor
     from sklearn.gaussian_process.kernels import (
         RBF,
@@ -490,9 +650,9 @@ def gpr_uncertainty(
         WhiteKernel,
     )
 
-    unit = embeddings.astype(np.float64)
-    components = min(n_components, unit.shape[0] - 1, unit.shape[1])
-    reduced = PCA(n_components=components, random_state=0).fit_transform(unit)
+    n_documents, n_features = z_l2.get_shape()
+    components = max(1, min(n_components, n_documents - 1, n_features - 1))
+    reduced = TruncatedSVD(n_components=components, random_state=0).fit_transform(z_l2)
 
     pairwise = pairwise_distances(coords, coords)
     upper = pairwise[np.triu_indices_from(pairwise, k=1)]
@@ -500,7 +660,7 @@ def gpr_uncertainty(
     length_scale = max(length_scale, 1e-3)
     LOGGER.info(
         "GPR diagnostic: fixed length_scale=%.4f (median inter-document distance), "
-        "%d PCA components",
+        "%d SVD components",
         length_scale,
         components,
     )
@@ -536,9 +696,62 @@ def gpr_uncertainty(
 # --------------------------------------------------------------------------- #
 # Objective assembly
 # --------------------------------------------------------------------------- #
+def distance_maximising_baseline(
+    d_nn: np.ndarray,
+    grid: np.ndarray,
+    objectives: np.ndarray,
+    support: np.ndarray,
+    reliability: np.ndarray,
+    boundary: np.ndarray,
+    gradient: np.ndarray,
+    count: int = 16,
+) -> dict[str, Any]:
+    """Reproduce Table 4: unconstrained distance maximisation versus the front.
+
+    The paper's negative control picks the ``count`` points with the largest
+    nearest-neighbour distance twice: once over the whole grid, and once over the
+    interior only (excluding the chart edge, ``x = +-1`` or ``y = +-1``). Every
+    unconstrained pick lands on the boundary, which is exactly why an
+    unconstrained novelty search is not a discovery criterion: it maximises
+    emptiness and pays for it in support, boundary strength, and gradient.
+    """
+    edge = np.isclose(np.abs(grid), 1.0).any(axis=1)
+    interior = np.flatnonzero(~edge)
+
+    def pick(indices: np.ndarray) -> np.ndarray:
+        order = indices[np.argsort(d_nn[indices])[::-1]]
+        return order[:count]
+
+    def summary(indices: np.ndarray) -> dict[str, float]:
+        return {
+            "d_nn": round(float(d_nn[indices].mean()), 4),
+            "S": round(float(support[indices].mean()), 4),
+            "R": round(float(reliability[indices].mean()), 4),
+            "P_boundary": round(float(boundary[indices].mean()), 4),
+            "G": round(float(gradient[indices].mean()), 4),
+            "points_on_chart_edge": int(edge[indices].sum()),
+        }
+
+    all_grid = pick(np.arange(len(d_nn)))
+    interior_only = pick(interior)
+    return {
+        "reference": "Obayashi et al. (2026) Table 4",
+        "count": count,
+        "all_grid": summary(all_grid),
+        "interior_only": summary(interior_only),
+        "all_grid_indices": [int(value) for value in all_grid],
+        "interior_only_indices": [int(value) for value in interior_only],
+        "interior_candidates": len(interior),
+        "notes": (
+            "Columns are mean values over the selected points. R is the averaged "
+            "dual-kernel reliability diagnostic and is not a Pareto objective."
+        ),
+    }
+
+
 def compute_objectives(
     config: dict[str, Any],
-    embeddings: NDArray[np.float32],
+    representation: Representation,
     regimes: NDArray[np.int64],
     n_regimes: int,
     manifold: Manifold,
@@ -548,48 +761,70 @@ def compute_objectives(
     grid = build_grid(config)
     coords = manifold.coords
     bounds_cfg = manifold_cfg.get("bounds", [-1.0, 1.0])
+    grid_size = int(manifold_cfg.get("grid_size", 21))
     spacing = float(
-        (float(bounds_cfg[1]) - float(bounds_cfg[0]))
-        / (int(manifold_cfg.get("grid_size", 21)) - 1)
+        (float(bounds_cfg[1]) - float(bounds_cfg[0])) / (grid_size - 1)
     )
 
     h_global = float(manifold_cfg.get("sph_h", 0.25))
     nearest_k = int(manifold_cfg.get("nearest_k", 8))
 
+    # Two smoothing schemes: one scale over the whole map, and one scale per
+    # document from its own 8th-nearest neighbour.
     w_global = sph_weights(grid, coords, h_global)
-    h_adaptive = adaptive_bandwidth(grid, coords, nearest_k)
-    w_adaptive = sph_weights(grid, coords, h_adaptive)
-
-    mix_global = regime_mixture(w_global, regimes, n_regimes)
-    mix_adaptive = regime_mixture(w_adaptive, regimes, n_regimes)
-
-    h_g, gap_g = boundary_strength(mix_global)
-    h_a, gap_a = boundary_strength(mix_adaptive)
-
-    n_h_g, p_h_g = normalize_percentile(h_g)
-    n_gap_g, p_gap_g = normalize_percentile(gap_g)
-    n_h_a, p_h_a = normalize_percentile(h_a)
-    n_gap_a, p_gap_a = normalize_percentile(gap_a)
-
-    b_global = ENTROPY_WEIGHT * n_h_g + GAP_WEIGHT * (1.0 - n_gap_g)
-    b_adaptive = ENTROPY_WEIGHT * n_h_a + GAP_WEIGHT * (1.0 - n_gap_a)
-
-    # Harmonic mean is the AND-like persistence operator (Eq. 21). A zero in
-    # either view must give zero, so guard the reciprocal explicitly.
-    denominator = np.where(
-        (b_global > 0) & (b_adaptive > 0),
-        1.0 / np.where(b_global > 0, b_global, 1.0)
-        + 1.0 / np.where(b_adaptive > 0, b_adaptive, 1.0),
-        np.inf,
+    h_documents = document_bandwidth(coords, nearest_k)
+    w_adaptive = sph_weights_adaptive(grid, coords, h_documents)
+    LOGGER.info(
+        "SPH bandwidth: global h=%.4f; adaptive h_i in [%.4f, %.4f] (median %.4f)",
+        h_global,
+        float(h_documents.min()),
+        float(h_documents.max()),
+        float(np.median(h_documents)),
     )
-    p_boundary = np.where(np.isinf(denominator), 0.0, 2.0 / denominator)
+
+    gram = gram_matrix(representation.z_l2)
+
+    views: dict[str, NDArray[np.float64]] = {}
+    entropies: dict[str, NDArray[np.float64]] = {}
+    gaps: dict[str, NDArray[np.float64]] = {}
+    mixtures: dict[str, NDArray[np.float64]] = {}
+    labels: dict[int, NDArray[np.int64]] = {}
+
+    for name, k, scheme in VIEW_SPECS:
+        if k not in labels:
+            labels[k] = cluster_labels(representation.z_l2, k)
+        weights = w_global if scheme == "global" else w_adaptive
+        mixture = normalized_mixture(weights, labels[k], k)
+        entropy, gap = boundary_strength(mixture)
+        views[name] = boundary_score(entropy, gap)
+        entropies[name] = entropy
+        gaps[name] = gap
+        mixtures[name] = mixture
+        LOGGER.info(
+            "Boundary view %-12s K=%d %-8s B in [%.3f, %.3f], mean %.3f",
+            name,
+            k,
+            scheme,
+            float(views[name].min()),
+            float(views[name].max()),
+            float(views[name].mean()),
+        )
+
+    p_boundary = persistent_boundary(views)
+    LOGGER.info(
+        "P_boundary (harmonic mean of three views): [%.3f, %.3f], mean %.3f, "
+        "zero at %d points",
+        float(p_boundary.min()),
+        float(p_boundary.max()),
+        float(p_boundary.mean()),
+        int((p_boundary == 0.0).sum()),
+    )
 
     d_nn = pairwise_distances(grid, coords).min(axis=1)
     quantiles = empirical_dnn_quantiles(d_nn, config)
     whitespace = band_pass_whitespace(d_nn, quantiles)
 
-    field = semantic_field(w_global, embeddings)
-    gradient_raw = gradient_magnitude(field, int(manifold_cfg.get("grid_size", 21)), spacing)
+    gradient_raw = semantic_gradient(w_global, gram, grid_size, spacing)
     gradient, p_gradient = normalize_percentile(gradient_raw)
 
     n_eff, d5, top_three = support_statistics(w_global, grid, coords)
@@ -602,11 +837,16 @@ def compute_objectives(
         + SUPPORT_W_T3 * (1.0 - n_t3)
     )
 
-    uncertainty_fields = gpr_uncertainty(embeddings, grid, coords)
+    uncertainty_fields = gpr_uncertainty(representation.z_l2, grid, coords)
     n_u_rbf, _ = normalize_percentile(uncertainty_fields["u_rbf"])
     n_u_matern, _ = normalize_percentile(uncertainty_fields["u_matern"])
     reliability = 0.5 * (1.0 - n_u_rbf) + 0.5 * (1.0 - n_u_matern)
     uncertainty = uncertainty_fields["u_mean"]
+    kernel_agreement = float(
+        np.corrcoef(uncertainty_fields["u_rbf"], uncertainty_fields["u_matern"])[0, 1]
+    )
+
+    regime_mixture = normalized_mixture(w_global, regimes, n_regimes)
 
     objectives = np.column_stack([p_boundary, whitespace, gradient, support])
 
@@ -623,12 +863,8 @@ def compute_objectives(
         support.max(),
     )
     LOGGER.info(
-        "Field stats: H_global=[%.3f, %.3f] H_adaptive=[%.3f, %.3f] "
-        "d_nn=[%.4f, %.4f] N_eff=[%.2f, %.2f] d5=[%.4f, %.4f] T3=[%.3f, %.3f]",
-        h_g.min(),
-        h_g.max(),
-        h_a.min(),
-        h_a.max(),
+        "Field stats: d_nn=[%.4f, %.4f] N_eff=[%.2f, %.2f] d5=[%.4f, %.4f] "
+        "T3=[%.3f, %.3f]",
         d_nn.min(),
         d_nn.max(),
         n_eff.min(),
@@ -639,11 +875,13 @@ def compute_objectives(
         top_three.max(),
     )
     LOGGER.info(
-        "GPR diagnostic: u=[%.5f, %.5f], R=[%.3f, %.3f] (not a Pareto objective)",
+        "GPR diagnostic: u=[%.5f, %.5f], R=[%.3f, %.3f], kernel agreement r=%.3f "
+        "(R is not a Pareto objective)",
         uncertainty.min(),
         uncertainty.max(),
         reliability.min(),
         reliability.max(),
+        kernel_agreement,
     )
 
     return {
@@ -651,16 +889,14 @@ def compute_objectives(
         "objectives": objectives,
         "d_nn": d_nn,
         "whitespace_quantiles": quantiles,
-        "h_global": h_g,
-        "h_adaptive": h_a,
-        "gap_global": gap_g,
-        "gap_adaptive": gap_a,
-        "b_global": b_global,
-        "b_adaptive": b_adaptive,
-        "mixture_global": mix_global,
-        "mixture_adaptive": mix_adaptive,
+        "views": views,
+        "entropies": entropies,
+        "gaps": gaps,
+        "mixtures": mixtures,
+        "labels": labels,
         "weights_global": w_global,
-        "h_adaptive_bandwidth": h_adaptive,
+        "weights_adaptive": w_adaptive,
+        "h_documents": h_documents,
         "n_eff": n_eff,
         "d5": d5,
         "top3": top_three,
@@ -669,11 +905,9 @@ def compute_objectives(
         "uncertainty_rbf": uncertainty_fields["u_rbf"],
         "uncertainty_matern": uncertainty_fields["u_matern"],
         "reliability": reliability,
+        "kernel_agreement": kernel_agreement,
+        "mixture_regime": regime_mixture,
         "percentiles": {
-            "H_global": p_h_g,
-            "gap_global": p_gap_g,
-            "H_adaptive": p_h_a,
-            "gap_adaptive": p_gap_a,
             "gradient": p_gradient,
             "n_eff": p_neff,
             "d5": p_d5,
@@ -682,56 +916,83 @@ def compute_objectives(
         "spacing": spacing,
         "sph_h": h_global,
         "nearest_k": nearest_k,
+        "grid_size": grid_size,
+        "baseline": distance_maximising_baseline(
+            d_nn=d_nn,
+            grid=grid,
+            objectives=objectives,
+            support=support,
+            reliability=reliability,
+            boundary=p_boundary,
+            gradient=gradient,
+        ),
     }
 
 
 # --------------------------------------------------------------------------- #
 # Persistence
 # --------------------------------------------------------------------------- #
-def save_grid(paths: Paths, manifold: Manifold, fields: dict[str, Any], corpus: dict[str, Any]) -> None:
+def save_grid(
+    paths: Paths,
+    manifold: Manifold,
+    fields: dict[str, Any],
+    corpus: dict[str, Any],
+) -> None:
     """Write the projection and objective matrix to ``data/manifold_grid.npz``."""
     paths.grid_npz.parent.mkdir(parents=True, exist_ok=True)
     papers = corpus["papers"]
+    views = fields["views"]
+    entropies = fields["entropies"]
+    gaps = fields["gaps"]
+    mixtures = fields["mixtures"]
 
-    np.savez_compressed(
-        paths.grid_npz,
-        grid=fields["grid"],
-        objectives=fields["objectives"],
-        objective_names=np.array(OBJECTIVE_NAMES),
-        doc_coords=manifold.coords,
-        doc_regime=np.array([int(paper["regime_id"]) for paper in papers], dtype=np.int64),
-        doc_ids=np.array([str(paper["id"]) for paper in papers]),
-        anchor_index=manifold.anchor_index,
-        anchor_target=manifold.anchor_target,
-        weights_global=fields["weights_global"].astype(np.float32),
-        d_nn=fields["d_nn"],
-        d5=fields["d5"],
-        n_eff=fields["n_eff"],
-        top3=fields["top3"],
-        gradient_raw=fields["gradient_raw"],
-        uncertainty=fields["uncertainty"],
-        uncertainty_rbf=fields["uncertainty_rbf"],
-        uncertainty_matern=fields["uncertainty_matern"],
-        reliability=fields["reliability"],
-        mixture_global=fields["mixture_global"],
-        mixture_adaptive=fields["mixture_adaptive"],
-        h_global_entropy=fields["h_global"],
-        h_adaptive_entropy=fields["h_adaptive"],
-        gap_global=fields["gap_global"],
-        gap_adaptive=fields["gap_adaptive"],
-        b_global=fields["b_global"],
-        b_adaptive=fields["b_adaptive"],
-        h_adaptive_bandwidth=fields["h_adaptive_bandwidth"],
-        whitespace_quantiles=np.array(
-            [fields["whitespace_quantiles"][key] for key in ("q20", "q60", "q85", "q98")]
+    archives: dict[str, Any] = {
+        "grid": fields["grid"],
+        "objectives": fields["objectives"],
+        "objective_names": np.array(OBJECTIVE_NAMES),
+        "doc_coords": manifold.coords,
+        "doc_regime": np.array(
+            [int(paper["regime_id"]) for paper in papers], dtype=np.int64
         ),
-        stress=np.array([manifold.stress]),
-        distance_correlation=np.array([manifold.distance_correlation]),
-        grid_size=np.array([int(np.sqrt(len(fields["grid"])))]),
-        spacing=np.array([fields["spacing"]]),
-        sph_h=np.array([fields["sph_h"]]),
-        nearest_k=np.array([fields["nearest_k"]]),
-    )
+        "doc_ids": np.array([str(paper["id"]) for paper in papers]),
+        "anchor_index": manifold.anchor_index,
+        "anchor_target": manifold.anchor_target,
+        "weights_global": fields["weights_global"].astype(np.float32),
+        "weights_adaptive": fields["weights_adaptive"].astype(np.float32),
+        "h_documents": fields["h_documents"],
+        "d_nn": fields["d_nn"],
+        "d5": fields["d5"],
+        "n_eff": fields["n_eff"],
+        "top3": fields["top3"],
+        "gradient_raw": fields["gradient_raw"],
+        "uncertainty": fields["uncertainty"],
+        "uncertainty_rbf": fields["uncertainty_rbf"],
+        "uncertainty_matern": fields["uncertainty_matern"],
+        "reliability": fields["reliability"],
+        "kernel_agreement": np.array([fields["kernel_agreement"]]),
+        "mixture_regime": fields["mixture_regime"],
+        "whitespace_quantiles": np.array(
+            [
+                fields["whitespace_quantiles"][key]
+                for key in ("q20", "q60", "q85", "q98")
+            ]
+        ),
+        "stress": np.array([manifold.stress]),
+        "distance_correlation": np.array([manifold.distance_correlation]),
+        "grid_size": np.array([fields["grid_size"]]),
+        "spacing": np.array([fields["spacing"]]),
+        "sph_h": np.array([fields["sph_h"]]),
+        "nearest_k": np.array([fields["nearest_k"]]),
+    }
+    for name, _, _ in VIEW_SPECS:
+        archives[f"b_{name}"] = views[name]
+        archives[f"entropy_{name}"] = entropies[name]
+        archives[f"gap_{name}"] = gaps[name]
+        archives[f"mixture_{name}"] = mixtures[name]
+    for k, labels in fields["labels"].items():
+        archives[f"labels_k{k}"] = labels
+
+    np.savez_compressed(paths.grid_npz, **archives)
     LOGGER.info(
         "Saved %s: grid=%s objectives=%s",
         paths.grid_npz,
@@ -740,20 +1001,26 @@ def save_grid(paths: Paths, manifold: Manifold, fields: dict[str, Any], corpus: 
     )
 
     manifest = {
-        "grid_size": int(np.sqrt(len(fields["grid"]))),
+        "grid_size": fields["grid_size"],
         "grid_points": len(fields["grid"]),
         "documents": int(manifold.coords.shape[0]),
         "spacing": fields["spacing"],
         "sph_h_global": fields["sph_h"],
-        "nearest_k": fields["nearest_k"],
+        "nearest_k_adaptive": fields["nearest_k"],
         "stress": manifold.stress,
         "distance_correlation": manifold.distance_correlation,
         "anchors": {
             "indices": [int(i) for i in manifold.anchor_index],
             "targets": manifold.anchor_target.tolist(),
         },
+        "boundary_views": [
+            {"name": name, "k": k, "scheme": scheme} for name, k, scheme in VIEW_SPECS
+        ],
+        "persistent_boundary": "harmonic mean of b_k5_global, b_k8_global, b_k8_adaptive",
         "whitespace_quantiles": fields["whitespace_quantiles"],
         "objective_names": list(OBJECTIVE_NAMES),
+        "kernel_agreement": fields["kernel_agreement"],
+        "baseline": fields["baseline"],
     }
     manifest_path = paths.grid_npz.with_suffix(".json")
     with manifest_path.open("w", encoding="utf-8") as handle:
@@ -766,7 +1033,7 @@ def save_grid(paths: Paths, manifold: Manifold, fields: dict[str, Any], corpus: 
 # Verification
 # --------------------------------------------------------------------------- #
 def verify_manifold(grid_npz: Path, expected_docs: int, expected_points: int) -> bool:
-    """Check shapes, bounds, and objective ranges of the saved grid."""
+    """Check shapes, bounds, objective ranges, and the Eq. 21 aggregation."""
     if not grid_npz.is_file():
         LOGGER.error("Missing %s", grid_npz)
         return False
@@ -776,6 +1043,7 @@ def verify_manifold(grid_npz: Path, expected_docs: int, expected_points: int) ->
         objectives = data["objectives"]
         doc_coords = data["doc_coords"]
         weights = data["weights_global"]
+        view_arrays = {name: data[f"b_{name}"] for name, _, _ in VIEW_SPECS}
 
     ok = True
     if grid.shape != (expected_points, 2):
@@ -799,6 +1067,10 @@ def verify_manifold(grid_npz: Path, expected_docs: int, expected_points: int) ->
             expected_docs,
         )
         ok = False
+    for name, values in view_arrays.items():
+        if values.shape != (expected_points,):
+            LOGGER.error("Boundary view %s has shape %s", name, values.shape)
+            ok = False
 
     if grid.min() < -1.0 - 1e-9 or grid.max() > 1.0 + 1e-9:
         LOGGER.error("Grid leaves the chart: [%.3f, %.3f]", grid.min(), grid.max())
@@ -822,6 +1094,18 @@ def verify_manifold(grid_npz: Path, expected_docs: int, expected_points: int) ->
         ok = False
     if not np.all(np.isfinite(weights)):
         LOGGER.error("SPH weight matrix contains non-finite values")
+        ok = False
+
+    # Eq. 21 must be reconstructible from the stored views alone.
+    recomputed = persistent_boundary(view_arrays)
+    drift = float(np.max(np.abs(recomputed - objectives[:, 0])))
+    LOGGER.info("Eq. 21 reconstruction drift: %.3e", drift)
+    if drift > 1e-12:
+        LOGGER.error(
+            "P_boundary is not the harmonic mean of the three stored views "
+            "(max drift %.3e)",
+            drift,
+        )
         ok = False
 
     per_objective = ", ".join(
@@ -860,11 +1144,6 @@ def main(argv: list[str] | None = None) -> int:
     if not paths.corpus.is_file():
         LOGGER.error("Corpus not found: %s", paths.corpus)
         return 1
-    if not paths.embeddings.is_file():
-        LOGGER.error(
-            "Embeddings not found: %s. Run 'python -m src.embed' first.", paths.embeddings
-        )
-        return 1
 
     try:
         with paths.corpus.open("r", encoding="utf-8") as handle:
@@ -873,13 +1152,6 @@ def main(argv: list[str] | None = None) -> int:
         LOGGER.error("Could not read corpus %s: %s", paths.corpus, exc)
         return 1
     papers = corpus["papers"]
-    embeddings = np.load(paths.embeddings)
-
-    if embeddings.shape[0] != len(papers):
-        LOGGER.error(
-            "Embedding rows (%d) != corpus papers (%d)", embeddings.shape[0], len(papers)
-        )
-        return 1
 
     manifold_cfg = config.get("manifold", {})
     grid_size = int(manifold_cfg.get("grid_size", 21))
@@ -887,10 +1159,19 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.verify_only:
         return (
-            0
-            if verify_manifold(paths.grid_npz, len(papers), expected_points)
-            else 1
+            0 if verify_manifold(paths.grid_npz, len(papers), expected_points) else 1
         )
+
+    try:
+        representation = load_representation(paths.tfidf_matrix, paths.tfidf_vocab)
+    except SystemExit as exc:
+        LOGGER.error("%s", exc)
+        return 2
+    if representation.doc_ids != [str(paper["id"]) for paper in papers]:
+        LOGGER.error(
+            "TF-IDF row order does not match corpus order; re-run 'python -m src.embed'"
+        )
+        return 2
 
     regimes = np.array([int(paper["regime_id"]) for paper in papers], dtype=np.int64)
     n_regimes = len({int(regime["id"]) for regime in config.get("regimes", [])}) or (
@@ -898,14 +1179,17 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     LOGGER.info(
-        "Building manifold for %d documents across %d regimes", len(papers), n_regimes
+        "Building manifold for %d documents across %d domain regimes "
+        "(K=5 and K=8 clusterings are computed separately)",
+        len(papers),
+        n_regimes,
     )
-    manifold = build_manifold(embeddings, config)
-    fields = compute_objectives(config, embeddings, regimes, n_regimes, manifold)
+    manifold = build_manifold(gram_matrix(representation.z_l2), config)
+    fields = compute_objectives(config, representation, regimes, n_regimes, manifold)
     save_grid(paths, manifold, fields, corpus)
 
     return 0 if verify_manifold(paths.grid_npz, len(papers), expected_points) else 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

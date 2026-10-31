@@ -25,6 +25,9 @@ __pycache__/
 # embeddings.npy and its manifest are derived state, rebuilt by `python -m src.embed`
 data/embeddings.npy
 data/embeddings_cache.json
+# Phase 1 scratch: downloaded PDFs and the per-paper text cache are rebuildable
+# from arXiv, and the PDFs alone are hundreds of megabytes.
+data/fulltext_cache/
 output/radar_map.html
 output/index.html
 
@@ -36,3 +39,7 @@ output/index.html
 
 # Ollama Modelfiles (generated during model registration)
 Modelfile.*
+
+# Sparse TF-IDF matrices are derived state, rebuilt by `python -m src.embed`
+# (14 MB binary; the vocabulary JSON next to it is what a reader needs to see).
+data/sparse_tfidf.npz

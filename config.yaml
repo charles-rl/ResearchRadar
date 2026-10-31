@@ -69,6 +69,56 @@ regimes:
       sample efficiency for robotic manipulation.
     query: 'abs:"reinforcement learning" AND abs:"manipulation" AND cat:cs.RO'
 
+# Phase 1: full-text extraction (Obayashi et al. 2026, Sec. 5.2: "PDF text was
+# extracted without OCR").  The paper never relied on abstract-only text, and
+# neither do we: TF-IDF n-grams, the semantic field v(x), and the local lenses
+# all consume full document text.
+fulltext:
+  output_path: "data/corpus_fulltext.json"
+  # User-curated seeding papers.  This is the single intentional structural
+  # difference from the paper: their corpus was seeded by a literature-search
+  # engine, ours is seeded by these hand-picked robotics papers and then
+  # expanded by citation snowballing into the 120-paper analysis corpus.
+  seeds_dir: "docs/papers/desired"
+  cache_dir: "data/fulltext_cache"
+  delay_seconds: 3.0
+  # Extraction sanity gate.  All three checks must pass; each catches a
+  # different failure mode (empty/truncated, broken font encoding, symbol soup).
+  min_words: 1000
+  mean_word_length_range: [3.5, 9.0]
+  # Letters+digits share of the non-whitespace characters, counted with Unicode
+  # semantics so Greek math does not read as soup.  Obayashi et al. (2026) give
+  # 75% as the bar; the cleaned corpus sits at 0.83-0.95 and a broken extraction
+  # (symbol soup) sits near 0.
+  min_alnum_ratio: 0.75
+  ar5iv_fallback: true
+
+# ---------------------------------------------------------------------------
+# Phase 2: within-word character n-gram TF-IDF (Obayashi et al. 2026, Sec. 5.2)
+#
+# The paper builds NO neural embedding.  Documents are represented by
+# within-word character n-grams (n = 4..7) weighted by sublinear term frequency
+# and smoothed inverse document frequency, and the SAME weighted matrix is
+# normalised two ways: L2 for the map and the semantic gradient, L1 for the
+# feature-allocation view used when reading evidence packages.
+# ---------------------------------------------------------------------------
+tfidf:
+  ngram_range: [4, 7]                 # Sec. 5.2: character n-grams, n = 4..7
+  max_features: 250000                # Sec. 5.2: at most 250,000 features
+  sublinear_tf: true                  # tf' = 1 + log(tf)
+  idf: "log(1 + N/df) + 1"            # smoothed idf, documented verbatim
+  lowercase: true
+  matrix_path: "data/sparse_tfidf.npz"
+  vocab_path: "data/tfidf_vocab.json"
+
+# ---------------------------------------------------------------------------
+# LEGACY (Phases 1-3 of the original plan, superseded).
+#
+# The F2LLM/Ollama embedding path is kept for reference only.  No pipeline
+# stage reads these keys any more: Obayashi et al. (2026) use sparse TF-IDF and
+# explicitly state that no language model is used in any objective or in the
+# frontier extraction (Sec. 5.5).  See docs/implementation-notes.md.
+# ---------------------------------------------------------------------------
 ollama:
   host: "http://localhost:11434"
   embed_endpoint: "/api/embed"
@@ -121,3 +171,12 @@ output:
   report_path: "output/RADAR_REPORT.md"
   dashboard_path: "output/index.html"
   dashboard_template: "templates/dashboard.html"
+
+audit:
+  # Appendix A.2 post-generation checklist applied to whatever an LLM returns
+  # for output/KMO_PROMPT_TOP1.txt. These bounds are verbatim from A.2 item 1.
+  task_a_words: [200, 280]   # Task A must land in this window
+  task_b_words: 45           # Task B must be exactly this many words
+  task_b_tolerance: 0        # the paper says "exactly"; no slack by default
+  max_supported_df: 3        # L1-only terms at or below this df need a [doc N]
+  emergent_df: 4             # L1-only terms at or above this df are emergent topics

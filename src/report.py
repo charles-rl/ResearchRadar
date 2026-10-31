@@ -34,9 +34,11 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import scipy.sparse as sp
 from numpy.typing import NDArray
 
 from .common import LOGGER, Paths, configure_logging, load_config, resolve_paths
+from .embed import Representation, load_representation
 
 DEFAULT_CONFIG = Path("config.yaml")
 PROMPT_TEMPLATE = Path("docs/kmo_prompt_template_A1.txt")
@@ -92,59 +94,61 @@ class Vocabulary:
     word_forms: dict[str, list[str]]
 
 
-def build_vocabulary(papers: list[dict[str, Any]]) -> Vocabulary:
-    """Fit TF-IDF on titles+abstracts and derive both normalizations.
+def build_vocabulary(representation: Representation) -> Vocabulary:
+    """Aggregate the n-gram representation onto whole words (Appendix A.1).
 
-    The same vocabulary and term weights are used for both lenses; only the row
-    normalization differs (``l2`` for the semantic geometry, ``l1`` for feature
-    allocation), which is how the paper separates the two views.
+    The lenses share the map's basis instead of running a second, word-level
+    vectoriser. Every n-gram score is projected onto the whole-word families it
+    was attested in (``WordIndex.feature_family``), so a family's local L2 weight
+    is the sum of its n-gram weights. ``document_frequency`` is counted per
+    family - a document counts if it contains *any* attested form - which keeps
+    Rule 2's ``df >= 4`` / ``df <= 3`` grading meaningful after aggregation.
     """
-    from sklearn.feature_extraction.text import TfidfVectorizer
+    word_index = representation.word_index
+    projection = word_index.feature_family
 
-    texts = [f"{paper['title']}. {paper['abstract']}" for paper in papers]
-    vectorizer = TfidfVectorizer(
-        sublinear_tf=True,
-        stop_words="english",
-        tokenizer=tokenize_word,
-        # ``token_pattern`` is stubbed as ``str`` only, but sklearn documents and
-        # accepts None to disable it when a ``tokenizer`` is supplied; leaving it
-        # set emits "The parameter 'token_pattern' will not be used" on every run.
-        token_pattern=None,  # type: ignore[arg-type]
-        lowercase=True,
+    # (n_documents x n_features) @ (n_features x n_families) -> dense & small.
+    l2 = np.asarray(
+        sp.csr_matrix(representation.z_l2 @ projection.transpose()).todense(),
+        dtype=np.float64,
     )
-    matrix = vectorizer.fit_transform(texts)
-    terms = np.asarray(vectorizer.get_feature_names_out())
+    l1 = np.asarray(
+        sp.csr_matrix(representation.z_l1 @ projection.transpose()).todense(),
+        dtype=np.float64,
+    )
 
-    row_sums = np.asarray(matrix.sum(axis=1)).ravel()
-    row_sums = np.where(row_sums <= 0.0, 1.0, row_sums)
-    l1_matrix = matrix.multiply(1.0 / row_sums[:, None]).tocsr()
-
-    document_frequency = np.asarray((matrix > 0).sum(axis=0)).ravel().astype(np.int64)
-    mean_l1 = np.asarray(l1_matrix.mean(axis=0)).ravel().astype(np.float64)
-
-    lower_terms = terms.tolist()
-    vocabulary_index = {term: index for index, term in enumerate(lower_terms)}
+    terms = np.asarray(word_index.family_terms, dtype=np.str_)
+    document_frequency = np.asarray(
+        word_index.family_document_frequency, dtype=np.int64
+    )
+    mean_l1 = l1.mean(axis=0).astype(np.float64)
     word_forms = {
-        term: _attested_forms(term, vocabulary_index) for term in lower_terms
+        term: list(forms)
+        for term, forms in zip(
+            word_index.family_terms, word_index.family_forms, strict=True
+        )
     }
 
     usable = np.array(
         [
             len(term) >= MIN_TERM_LENGTH and term not in PROSE_FILLER
-            for term in lower_terms
+            for term in word_index.family_terms
         ],
         dtype=bool,
     )
 
     LOGGER.info(
-        "Vocabulary: %d terms, %d usable after the prose filter",
+        "Vocabulary: %d whole-word families from %d n-grams (%.1f%% attributed), "
+        "%d usable after the prose filter",
         len(terms),
+        representation.n_features,
+        100.0 * word_index.coverage,
         int(usable.sum()),
     )
     return Vocabulary(
         terms=terms,
-        l2=matrix.toarray(),  # type: ignore[assignment]
-        l1=l1_matrix.toarray(),  # type: ignore[assignment]
+        l2=l2,
+        l1=l1,
         document_frequency=document_frequency,
         mean_l1=mean_l1,
         usable=usable,
@@ -175,6 +179,11 @@ def _attested_forms(term: str, index: dict[str, int]) -> list[str]:
     return sorted(forms)
 
 
+def doc_label(index: int) -> str:
+    """Sequential document id, one-based, as Appendix A.1 Rule 2 cites it."""
+    return f"doc {index + 1}"
+
+
 def witness_documents(
     column: NDArray[np.float64] | NDArray[np.int64],
     normalized_weights: NDArray[np.float64],
@@ -191,7 +200,8 @@ def witness_documents(
             continue
         witnesses.append(
             {
-                "doc": str(papers[int(index)]["id"]),
+                "doc": doc_label(int(index)),
+                "arxiv": str(papers[int(index)]["id"]),
                 "title": str(papers[int(index)]["title"]),
                 "weight": round(float(normalized_weights[int(index)]), 4),
             }
@@ -290,7 +300,8 @@ def contributing_documents(
     order = np.argsort(normalized)[::-1][:limit]
     return [
         {
-            "doc": str(papers[int(index)]["id"]),
+            "doc": doc_label(int(index)),
+            "arxiv": str(papers[int(index)]["id"]),
             "title": str(papers[int(index)]["title"]),
             "authors": list(papers[int(index)]["authors"])[:3],
             "year": int(papers[int(index)]["year"]),
@@ -313,13 +324,21 @@ def build_evidence_package(
     weights = np.asarray(grid_data["weights_global"][index], dtype=np.float64)
     lenses = local_lenses(weights, vocabulary, papers)
 
-    mixture_global = np.asarray(grid_data["mixture_global"][index], dtype=np.float64)
-    mixture_adaptive = np.asarray(grid_data["mixture_adaptive"][index], dtype=np.float64)
-
+    # Three boundary views exist (K=5 global, K=8 global, K=8 adaptive). Report
+    # the Discovery-level (K=5) mixture as the headline and keep the K=8 views
+    # alongside it, because cluster labels are not comparable across K and only
+    # the scalar boundary measures can be cross-checked (Sec. 3.2).
     mixture = {
         label: {
-            "global": round(float(mixture_global[position]), 4),
-            "adaptive": round(float(mixture_adaptive[position]), 4),
+            "k5_global": round(
+                float(np.asarray(grid_data["mixture_k5_global"])[index][position]), 4
+            ),
+            "k8_global": round(
+                float(np.asarray(grid_data["mixture_k8_global"])[index][position]), 4
+            ),
+            "k8_adaptive": round(
+                float(np.asarray(grid_data["mixture_k8_adaptive"])[index][position]), 4
+            ),
         }
         for position, label in enumerate(regime_labels)
     }
@@ -327,8 +346,12 @@ def build_evidence_package(
     n_eff = float(np.asarray(grid_data["n_eff"])[index])
     top3 = float(np.asarray(grid_data["top3"])[index])
     d5 = float(np.asarray(grid_data["d5"])[index])
-    entropy = float(np.asarray(grid_data["h_global_entropy"])[index])
-    uncertainty = float(np.asarray(grid_data["uncertainty"])[index])
+    entropy = float(np.asarray(grid_data["entropy_k5_global"])[index])
+    # Appendix A.1 asks for ``relative_uncertainty_u``; the paper keeps the RBF
+    # surrogate as the reference model (Sec. 8.5) and the Matern kernel as a
+    # robustness check, so the reported u is the RBF standard deviation. The
+    # averaged dual-kernel R stays a diagnostic and is reported separately.
+    uncertainty = float(np.asarray(grid_data["uncertainty_rbf"])[index])
 
     return {
         "location": {
@@ -343,6 +366,10 @@ def build_evidence_package(
         "regime_mixture": mixture,
         "effective_contributing_documents": round(n_eff, 2),
         "relative_uncertainty_u": round(uncertainty, 6),
+        "relative_uncertainty_u_rbf": round(uncertainty, 6),
+        "relative_uncertainty_u_matern": round(
+            float(np.asarray(grid_data["uncertainty_matern"])[index]), 6
+        ),
         "top3_weight_concentration_T3": round(top3, 4),
         "fifth_neighbour_distance_d5": round(d5, 4),
         "objectives": point["objectives"],
@@ -829,9 +856,19 @@ def render_markdown(
         lines.append("")
         lines.append(
             _markdown_table(
-                ["Regime", "Global mixture", "Adaptive mixture"],
                 [
-                    [label, f"{data['global']:.3f}", f"{data['adaptive']:.3f}"]
+                    "Regime",
+                    "K=5 global",
+                    "K=8 global",
+                    "K=8 adaptive",
+                ],
+                [
+                    [
+                        label,
+                        f"{data['k5_global']:.3f}",
+                        f"{data['k8_global']:.3f}",
+                        f"{data['k8_adaptive']:.3f}",
+                    ]
                     for label, data in package["regime_mixture"].items()
                 ],
             )
@@ -842,7 +879,8 @@ def render_markdown(
             f"contributing documents `N_eff = {package['effective_contributing_documents']:.1f}`; "
             f"top-3 weight concentration `T3 = {package['top3_weight_concentration_T3']:.3f}`; "
             f"5th-neighbour distance `d5 = {package['fifth_neighbour_distance_d5']:.3f}`; "
-            f"relative uncertainty `u = {package['relative_uncertainty_u']:.4f}`."
+            f"relative uncertainty `u = {package['relative_uncertainty_u']:.4f}` (RBF "
+            f"surrogate; Matern `{package['relative_uncertainty_u_matern']:.4f}`)."
         )
         lines.append("")
         lines.append("##### Top 5 contributing anchor papers")
@@ -1027,8 +1065,83 @@ def render_markdown(
     )
     lines.append("")
 
+    # --- Table 4 baseline -------------------------------------------------
+    baseline = (config.get("_baseline") or {})
+    if baseline:
+        lines.append("## 6. Distance-maximising baseline (Table 4 analogue)")
+        lines.append("")
+        lines.append(
+            "The negative control of Obayashi et al. (2026) Sec. 8.8: pick the "
+            f"{baseline['count']} grid points with the largest nearest-neighbour "
+            "distance, once over the whole grid and once over the interior only "
+            "(excluding `x = ±1` and `y = ±1`), then compare their mean scores with "
+            "the practical front. An unconstrained novelty search maximises "
+            "emptiness, not discovery value."
+        )
+        lines.append("")
+
+        # The front's own means, read from the same arrays the baseline uses so
+        # the two rows are directly comparable. R is the dual-kernel reliability
+        # diagnostic - it is NOT the GPR uncertainty u.
+        reliability = np.asarray(grid_data["reliability"], dtype=np.float64)
+        front_indices = np.array(
+            [int(solution["grid_index"]) for solution in solutions], dtype=np.int64
+        )
+        front_means = {
+            "d_nn": float(np.mean([float(package["fifth_neighbour_distance_d5"]) for package in packages.values()])),
+            "S": float(np.mean([float(package["objectives"]["S"]) for package in packages.values()])),
+            "R": float(reliability[front_indices].mean()),
+            "P_boundary": float(np.mean([float(package["objectives"]["P_boundary"]) for package in packages.values()])),
+            "G": float(np.mean([float(package["objectives"]["G"]) for package in packages.values()])),
+        }
+        rows = [
+            [
+                "**Practical Pareto front (this report)**",
+                *[f"{front_means[key]:.4f}" for key in ("d_nn", "S", "R", "P_boundary", "G")],
+            ]
+        ]
+        for label, key in (
+            ("Distance-maximising, all grid", "all_grid"),
+            ("Distance-maximising, interior only", "interior_only"),
+        ):
+            entry = baseline[key]
+            rows.append(
+                [
+                    label,
+                    *[
+                        f"{entry[column]:.4f}"
+                        for column in ("d_nn", "S", "R", "P_boundary", "G")
+                    ],
+                ]
+            )
+        lines.append(
+            _markdown_table(
+                ["Selection", "d_nn", "S", "R", "P_boundary", "G"],
+                rows,
+            )
+        )
+        lines.append("")
+        lines.append(
+            f"All {baseline['all_grid']['points_on_chart_edge']} unconstrained picks sit "
+            f"on the chart edge, and {baseline['interior_only']['points_on_chart_edge']} "
+            f"of the {baseline['count']} interior-only picks do. Restricting the search "
+            f"to the {baseline['interior_candidates']} interior points recovers support "
+            f"(`S` {baseline['all_grid']['S']:.3f} -> "
+            f"{baseline['interior_only']['S']:.3f}) but still trails the practical "
+            f"front, which is the paper's point: distance alone is not a discovery "
+            f"criterion. Two caveats when reading this table. The distance column is "
+            "the *fifth*-neighbour distance used throughout this report, not the "
+            "nearest-neighbour distance of the paper's Table 4, so the absolute "
+            "numbers are not comparable across the two studies. And `R` is reported "
+            "as a diagnostic only: it rewards low surrogate uncertainty (Sec. 3.7), "
+            "which is why it is excluded from the objectives. The front scoring high "
+            "on `R` therefore says the selected locations sit in well-sampled regions "
+            "of the surrogate, not that the front was optimised for it."
+        )
+        lines.append("")
+
     # --- prompt payload -------------------------------------------------
-    lines.append("## 6. Evidence-constrained verbalization prompt")
+    lines.append("## 7. Evidence-constrained verbalization prompt")
     lines.append("")
     lines.append(
         "The block below is the **verbatim** Appendix A.1 prompt template from "
@@ -1051,7 +1164,7 @@ def render_markdown(
     lines.append("")
 
     # --- verification ---------------------------------------------------
-    lines.append("## 7. Reproduce and verify")
+    lines.append("## 8. Reproduce and verify")
     lines.append("")
     lines.append("```bash")
     lines.append(".venv/bin/python -m src.harvest --verify-only")
@@ -1061,7 +1174,7 @@ def render_markdown(
     lines.append(".venv/bin/python -m src.report   --verify-only")
     lines.append("```")
     lines.append("")
-    lines.append("## 8. Caveats")
+    lines.append("## 9. Caveats")
     lines.append("")
     lines.append(
         "- Novelty is **corpus-relative**. These are gaps in a 120-paper arXiv sample, "
@@ -1159,6 +1272,7 @@ def build_gap_packages(
     grid_data: dict[str, Any],
     front: dict[str, Any],
     config: dict[str, Any],
+    paths: Paths | None = None,
     limit: int | None = None,
 ) -> tuple[Vocabulary, dict[int, dict[str, Any]]]:
     """Build the evidence package for every practical Pareto gap.
@@ -1175,7 +1289,18 @@ def build_gap_packages(
     if not regime_labels:
         regime_labels = sorted({str(paper["regime_label"]) for paper in papers})
 
-    vocabulary = build_vocabulary(papers)
+    if paths is None:
+        raise SystemExit(
+            "build_gap_packages needs the resolved Paths to load the TF-IDF "
+            "representation the lenses are aggregated from"
+        )
+    representation = load_representation(paths.tfidf_matrix, paths.tfidf_vocab)
+    if representation.doc_ids != [str(paper["id"]) for paper in papers]:
+        raise SystemExit(
+            "TF-IDF row order does not match the corpus; re-run "
+            "`python -m src.embed`"
+        )
+    vocabulary = build_vocabulary(representation)
     # Archetype labels, N_eff, and top-3 anchors are derived per solution and are
     # needed by every consumer (the report's front table and the dashboard's
     # scorecard), so they are attached here rather than by a caller.
@@ -1212,7 +1337,9 @@ def write_outputs(
         )
     template = template_path.read_text(encoding="utf-8")
 
-    vocabulary, packages = build_gap_packages(corpus, grid_data, front, config)
+    vocabulary, packages = build_gap_packages(
+        corpus, grid_data, front, config, paths
+    )
 
     primary = front["solutions"][0]
     primary_package = packages[int(primary["grid_index"])]
@@ -1231,8 +1358,12 @@ def write_outputs(
     figure.write_html(paths.html, include_plotlyjs="cdn")
     LOGGER.info("Saved %s (%d bytes)", paths.html, paths.html.stat().st_size)
 
+    report_config = dict(config)
+    report_config["_baseline"] = (
+        read_json(paths.grid_npz.with_suffix(".json")).get("baseline") or {}
+    )
     markdown = render_markdown(
-        corpus, grid_data, front, vocabulary, packages, prompt_text, config
+        corpus, grid_data, front, vocabulary, packages, prompt_text, report_config
     )
     paths.report.parent.mkdir(parents=True, exist_ok=True)
     paths.report.write_text(markdown + "\n", encoding="utf-8")
@@ -1285,7 +1416,8 @@ def verify_outputs(
         "## 3. Discovery archetypes",
         "## 4. Deep dive: top 3 Pareto archetypes",
         "## 5. Local vocabulary analysis",
-        "## 6. Evidence-constrained verbalization prompt",
+        "## 6. Distance-maximising baseline (Table 4 analogue)",
+        "## 7. Evidence-constrained verbalization prompt",
     ]
     for section in sections:
         if section not in markdown:
@@ -1311,7 +1443,7 @@ def verify_outputs(
 
     if missing:
         LOGGER.error(
-            "Report deviates from the verbatim Appendix A.1 template in %d line(s); "
+            "Report deviates from the Appendix A.1 template in %d line(s); "
             "first: %r",
             len(missing),
             missing[0],
@@ -1319,7 +1451,45 @@ def verify_outputs(
         ok = False
     else:
         LOGGER.info(
-            "Verbatim Appendix A.1 template present (%d lines)", len(template_lines)
+            "Appendix A.1 template present (%d lines)", len(template_lines)
+        )
+
+    # The template is the paper's text with exactly one documented change: Rule 3
+    # names the paper's own domain ("composites"), and this corpus is robotics.
+    # Pinning the diff keeps the edit honest instead of letting it drift.
+    original_path = template_path.with_name(
+        template_path.stem + ".original" + template_path.suffix
+    )
+    if original_path.is_file():
+        original = original_path.read_text(encoding="utf-8")
+        edited = template_path.read_text(encoding="utf-8")
+        changed = [
+            (left, right)
+            for left, right in zip(
+                original.splitlines(), edited.splitlines(), strict=False
+            )
+            if left != right
+        ]
+        same_length = len(original.splitlines()) == len(edited.splitlines())
+        documented = len(changed) == 1 and (
+            "composites" in changed[0][0] and "robotics" in changed[0][1]
+        )
+        if not (same_length and documented):
+            LOGGER.error(
+                "Prompt template differs from the PDF extract in %d line(s); only "
+                "the documented composites -> robotics edit is permitted",
+                len(changed),
+            )
+            ok = False
+        else:
+            LOGGER.info(
+                "Prompt template: 1 documented edit vs the PDF extract "
+                "(composites -> robotics)"
+            )
+    else:
+        LOGGER.warning(
+            "No pristine template at %s; skipping the documented-diff check",
+            original_path,
         )
 
     # Every required evidence field must appear inside the pasted prompt block.
@@ -1347,7 +1517,7 @@ def verify_outputs(
         html_size,
         len(markdown),
         len(table_rows),
-        len(markdown.split("## 6.")[1]) if "## 6." in markdown else 0,
+        len(markdown.split("## 7.")[1]) if "## 7." in markdown else 0,
     )
     return ok
 
