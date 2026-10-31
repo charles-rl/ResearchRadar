@@ -1,0 +1,115 @@
+# config.yaml — Project ResearchRadar
+# Automated Knowledge Manifold Optimization for Robotics
+#
+# Phase 1/2 configuration: literature harvesting across three conflicting
+# robotics paradigms (Obayashi et al. 2026, Knowledge Manifold Optimization).
+
+corpus:
+  # Balanced corpus: 40 papers per regime x 3 regimes = 120 total
+  target_per_regime: 40
+  total_target: 120
+  output_path: "data/corpus.json"
+
+  # arXiv API client paging (Phase 2)
+  page_size: 100             # results per HTTP request
+  max_query_results: 400     # hard ceiling of candidates scanned per regime
+  delay_seconds: 3.0         # polite delay between paged requests (arXiv ToS)
+  num_retries: 5
+
+  # Minimum abstract length in whitespace-delimited words.
+  # Stubs/withdrawn records carry degenerate abstracts that corrupt the manifold.
+  min_abstract_words: 40
+
+  # Review/survey exclusion keywords (Obayashi et al. 2026, Sec. 5.1).
+  # Review articles intentionally aggregate broad areas of prior work and
+  # therefore distort local semantic density and kernel interpolation.
+  exclude_review_keywords:
+    - "review"
+    - "survey"
+    - "overview"
+    - "progress in"
+    - "recent advances"
+    - "roadmap"
+    - "perspectives on"
+
+  # Opening-sentence abstract patterns that mark a review/survey even when the
+  # title is neutral (Sec. 5.1 operationalization).
+  exclude_review_abstract_patterns:
+    - "a comprehensive survey"
+    - "this survey"
+    - "this review"
+    - "we survey"
+    - "we review the"
+    - "an overview of recent"
+    - "review of the literature"
+    - "literature review"
+
+regimes:
+  - id: 0
+    name: "Classical System Identification"
+    label: "SysID"
+    description: >-
+      Analytical / grey-box models, least squares, Kalman filtering, state
+      estimation for robotic and control systems.
+    query: 'abs:"system identification" AND (cat:cs.RO OR cat:eess.SY)'
+
+  - id: 1
+    name: "Domain Randomization & Sim-to-Real"
+    label: "Sim2Real"
+    description: >-
+      Stochastic physics perturbation, domain randomization, reality-gap
+      transfer bounds.
+    query: 'abs:"domain randomization" AND abs:"sim-to-real" AND cat:cs.RO'
+
+  - id: 2
+    name: "Deep Reinforcement Learning Control"
+    label: "RL"
+    description: >-
+      Policy gradient, actor-critic, PPO, stochastic policies, exploration and
+      sample efficiency for robotic manipulation.
+    query: 'abs:"reinforcement learning" AND abs:"manipulation" AND cat:cs.RO'
+
+ollama:
+  host: "http://localhost:11434"
+  embed_endpoint: "/api/embed"
+  embeddings_endpoint: "/api/embeddings"
+  # Ollama tags registered from the GGUF builds in models/gguf/ (see README)
+  model: "codefuse-ai/F2LLM-4B"            # primary; 2560-dim, bf16, ~7.6 GB
+  fallback_model: "codefuse-ai/F2LLM-0.6B" # fallback / unit tests; 1024-dim
+  hf_model: "codefuse-ai/F2LLM-4B"         # upstream HF identifier
+  hf_fallback_model: "codefuse-ai/F2LLM-0.6B"
+  batch_size: 16
+  timeout_seconds: 300
+  keep_alive: "30m"                        # keep weights resident across batches
+  embeddings_cache: "data/embeddings.npy"
+  cache_manifest: "data/embeddings_cache.json"
+
+# Locally downloaded weights (git-ignored, not redistributed)
+models:
+  local_root: "models"
+  f2llm_4b: "models/F2LLM-4B"
+  f2llm_0_6b: "models/F2LLM-0.6B"
+  gguf_root: "models/gguf"
+  gguf_4b: "models/gguf/F2LLM-4B-bf16.gguf"
+  gguf_0_6b: "models/gguf/F2LLM-0.6B-bf16.gguf"
+
+manifold:
+  grid_size: 21           # 21x21 = 441 evaluation points (Obayashi et al. Sec. 5.5)
+  bounds: [-1.0, 1.0]     # Chart Omega = [-1, 1]^2 (Obayashi et al. Sec. 2.1)
+  sph_h: 0.25             # Kernel smoothing parameter
+  nearest_k: 8            # Adaptive neighborhood scale (Obayashi et al. Sec. 5.4)
+  q_whitespace:           # Empirical quantiles for band-pass W(x) (Eq. 12, Eq. 28)
+    q20: 0.0517
+    q60: 0.1000
+    q85: 0.1376
+    q98: 0.2000
+
+pareto:
+  # Practical Pareto constraint: drop zero-white-space edge artifacts
+  min_whitespace: 0.0
+  objectives: ["P_boundary", "W", "G", "S"]
+  ideal_point: [1.0, 1.0, 1.0, 1.0]
+
+output:
+  html_path: "output/radar_map.html"
+  report_path: "output/RADAR_REPORT.md"

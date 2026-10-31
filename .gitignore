@@ -1,0 +1,31 @@
+# Reference papers (local, not redistributed)
+docs/papers/
+
+# Local model weights (F2LLM-4B / F2LLM-0.6B, multi-GB, not redistributed)
+models/
+
+# Python virtual environment
+.venv/
+.venv-convert/
+venv/
+env/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Agent scratch / task output
+.pi/tasks/
+
+# Generated artifacts
+# embeddings.npy and its manifest are derived state, rebuilt by `python -m src.embed`
+data/embeddings.npy
+data/embeddings_cache.json
+output/
+
+# Ollama Modelfiles (generated during model registration)
+Modelfile.*
