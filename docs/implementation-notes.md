@@ -173,6 +173,30 @@ by different models. The cache keys on `model`, so switching forces a re-embed.
 - **The Appendix A.1 template's last line ends in a space.** Calling `.rstrip()`
   on the extracted text made the rendered prompt differ from the paper and the
   verbatim check failed. The template is now copied byte-for-byte.
+- **Plotly heatmaps read `z[i][j]` at `(y=axis[i], x=axis[j])`.** The grid is
+  built row-major as `(x=axis[i], y=axis[j])`, so passing a plain `reshape` to
+  Plotly mirrors every field across the diagonal while the paper markers stay
+  correct — the overlay silently disagrees with the points. `objective_field()`
+  transposes before export, and `src.dashboard --verify-only` asserts an
+  asymmetric cell (`(x=-0.7, y=+0.7)` is 0.62 there, vs 0.0 at the mirror).
+- **Heatmaps must be added before the markers.** Appending the field traces last
+  put the overlay on top of the papers and gap stars. They are now the first
+  traces, and `visible: false` on every field keeps the first frame to markers
+  and gaps.
+- **Never build per-trace `visible` arrays from a dict of trace indices.** The
+  three `#1` halo traces are pushed in a loop and never got an index entry, so
+  `Object.keys(PLOT).map(...)` produced 11 entries for a 14-trace figure and
+  shifted visibility onto the wrong traces. `buildManifold()` now keeps an
+  `owners` array with one key per trace and `setLayer()` maps over that.
+- **Embedded JSON must not contain a raw `<`.** A paper title with `</script>`
+  would terminate the payload block. `encode_payload()` escapes `<`, `>`, `&`,
+  and U+2028/U+2029 to `\uXXXX`, which stays valid JSON and valid JS.
+- **Build DOM nodes, not markup strings.** The first dashboard draft assembled
+  panels with `innerHTML` and string interpolation, which puts corpus text
+  (paper titles, abstract-derived terms) one quoting bug away from executing.
+  Every panel is now built with `createElement` plus `textContent`; the only
+  HTML strings left are Plotly hover labels, which Plotly renders itself and
+  which are escaped at construction.
 
 ## Offline verification
 
@@ -184,4 +208,14 @@ All five stages verify without network access and exit non-zero on failure:
 .venv/bin/python -m src.manifold --verify-only   # grid, anchors, objective ranges
 .venv/bin/python -m src.pareto   --verify-only   # dominance, ranking, archetypes
 .venv/bin/python -m src.report   --verify-only   # artifacts, verbatim prompt
+.venv/bin/python -m src.dashboard --verify-only  # self-contained page, payload
+node tests/dashboard_smoke.js output/index.html  # dashboard script under a DOM shim
 ```
+
+The dashboard check confirms there is no local asset path, no `fetch()` or
+`XMLHttpRequest`, and that the embedded `#1` prompt is byte-identical to
+`output/KMO_PROMPT_TOP1.txt`. The Node harness executes the page's own inline
+script against the real payload under a minimal DOM shim: it asserts 120 papers
+across 3 regimes, 33 clickable gaps, 4 hidden 21x21 field layers, the field
+orientation, the closed 4-axis radar, the 5 anchor links, gap stepping, the
+click handler, and that a layer toggle keeps every marker trace visible.

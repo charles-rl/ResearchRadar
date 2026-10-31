@@ -26,9 +26,11 @@ __pycache__/
 data/embeddings.npy
 data/embeddings_cache.json
 output/radar_map.html
+output/index.html
 
 # The text deliverables stay tracked: they diff readably and are the project's
-# actual output. The HTML is a 93 KB single-line JSON blob and is regenerable.
+# actual output. Both HTML files are single-line embedded-JSON blobs that
+# regenerate from `python -m src.report` / `python -m src.dashboard`.
 !output/RADAR_REPORT.md
 !output/KMO_PROMPT_TOP1.txt
 

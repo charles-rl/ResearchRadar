@@ -33,6 +33,7 @@ PIP_CONFIG_FILE=/dev/null .venv/bin/pip install --isolated \
 .venv/bin/python -m src.report       # -> output/radar_map.html
                                      #    output/RADAR_REPORT.md
                                      #    output/KMO_PROMPT_TOP1.txt
+.venv/bin/python -m src.dashboard    # -> output/index.html (standalone app)
 ```
 
 Every module supports offline re-verification:
@@ -43,6 +44,8 @@ Every module supports offline re-verification:
 .venv/bin/python -m src.manifold --verify-only
 .venv/bin/python -m src.pareto   --verify-only
 .venv/bin/python -m src.report   --verify-only
+.venv/bin/python -m src.dashboard --verify-only
+node tests/dashboard_smoke.js output/index.html
 ```
 
 ## Why the pip flags
@@ -136,6 +139,33 @@ from `models/F2LLM-*` with the recipe above only if you need to re-register.
   placeholder file name, and `--verify-only` compares the rendered prompt to the
   template line by line, so the wording cannot drift.
 
+## The dashboard
+
+`output/index.html` is a single self-contained page: the corpus, the four
+objective fields, and one evidence package per gap are baked into an inline JSON
+payload, so it opens straight from the filesystem with no server and no build
+step. Tailwind, Plotly, and Lucide load from CDNs (pinned, with SRI hashes).
+
+* **Left panel** — the manifold on `[-1, 1]^2`, papers coloured by regime, the 33
+  practical gaps as stars, and layer buttons (keys `1`-`5`) that swap the
+  background between `P_boundary`, `W`, `G`, and `S`.
+* **Right panel** — the selected gap's evidence package: a 4-axis objective
+  radar, support statistics, the regime mixture, the top-5 anchor papers, the
+  L2/L1 lexical split, and the Appendix A.1 prompt with a copy button.
+* **Navigation** — click a star, use the dropdown, or press the arrow keys.
+  `#gap=<rank>` deep-links a gap.
+
+The prompt text comes from `src.report.render_prompt_text`, the same function
+the Markdown report uses, so the pasted prompt and `KMO_PROMPT_TOP1.txt` are
+byte-identical — `src.dashboard --verify-only` asserts exactly that.
+
+`tests/dashboard_smoke.js` runs the page's own inline script against the real
+payload under a minimal DOM shim, so it catches renderer bugs without a browser:
+
+```bash
+node tests/dashboard_smoke.js output/index.html
+```
+
 ## Layout
 
 ```text
@@ -148,8 +178,11 @@ src/common.py                     config loading, path resolution, logging
 src/manifold.py                   MDS, discovery grid, the four KMO objectives
 src/pareto.py                     exact dominance, practical front, archetypes
 src/report.py                     Plotly map, Markdown report, LLM prompt
+src/dashboard.py                  standalone output/index.html generator
+templates/dashboard.html          the page shell and its inline app script
+tests/dashboard_smoke.js          offline DOM-shim test of the dashboard script
 data/corpus.json                  the 120-paper corpus (committed)
 data/embeddings.npy               derived embedding matrix (git-ignored)
 data/manifold_grid.npz            grid coordinates and objective matrix
-output/                           rendered artifacts (git-ignored)
+output/                           rendered artifacts (HTML git-ignored)
 ```

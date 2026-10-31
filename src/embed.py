@@ -367,7 +367,7 @@ def load_embeddings_matrix(matrix_path: Path) -> np.ndarray | None:
 # --------------------------------------------------------------------------- #
 def _canonical_tag(name: str) -> str:
     """Strip Ollama's implicit ``:latest`` suffix so tags compare equal."""
-    return name[:-len(":latest")] if name.endswith(":latest") else name
+    return name.removesuffix(":latest")
 
 
 def resolve_model(config: dict[str, Any], override: str | None, host: str) -> str:

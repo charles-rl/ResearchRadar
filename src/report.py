@@ -349,6 +349,13 @@ def build_evidence_package(
         "rank": point["rank"],
         "ideal_distance": point["ideal_distance"],
         "on_outer_boundary": point["on_outer_boundary"],
+        # Terms that appear in BOTH lenses carry the strongest evidence under
+        # Appendix A.1 rule 1, so they are surfaced as a first-class field.
+        "shared_terms": [
+            entry["term"]
+            for entry in lenses["theme_lens_L2"]
+            if entry["in_both_lenses"]
+        ],
     }
 
 
@@ -387,6 +394,22 @@ def prompt_evidence_package(package: dict[str, Any]) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Plotly figure
 # --------------------------------------------------------------------------- #
+def objective_field(
+    objectives: NDArray[np.float64], position: int, grid_size: int
+) -> NDArray[np.float64]:
+    """Return one objective as a ``grid_size x grid_size`` field for a heatmap.
+
+    ``build_grid`` lays points out with ``np.meshgrid(..., indexing="ij")`` and
+    ``ravel()``, so row-major index ``i * size + j`` holds the point
+    ``(x=axis[i], y=axis[j])``. A plain ``reshape`` therefore yields
+    ``M[a][b] = f(x=axis[a], y=axis[b])``, but Plotly draws ``z[i][j]`` at
+    ``y=axis[i], x=axis[j]``. The array must be transposed or every field is
+    mirrored across the diagonal - which is invisible for symmetric fields but
+    wrong here, where 412 of 441 cells differ.
+    """
+    return objectives[:, position].reshape(grid_size, grid_size).T
+
+
 def build_figure(
     corpus: dict[str, Any],
     grid_data: dict[str, NDArray[np.float64] | NDArray[np.int64] | NDArray[np.str_]],
@@ -403,7 +426,26 @@ def build_figure(
     grid_size = round(np.sqrt(len(grid)))
     axis = np.unique(np.round(grid[:, 0], 10))
 
+    # Heatmaps go in first so the papers and gap markers draw on top of them.
+    # Appending them last (as an earlier version did) hides every document behind
+    # the field overlay.
     traces: list[Any] = []
+    for position, name in enumerate(objective_names):
+        traces.append(
+            go.Heatmap(
+                x=axis,
+                y=axis,
+                z=objective_field(objectives, position, grid_size),
+                name=name,
+                colorscale="Viridis",
+                opacity=0.72,
+                showscale=True,
+                colorbar={"title": name, "thickness": 12, "len": 0.6},
+                hovertemplate=f"{name} %{{z:.3f}}<br>(%{{x:.2f}}, %{{y:.2f}})<extra></extra>",
+                visible=False,
+            )
+        )
+    heatmap_count = len(traces)
     for label in ("SysID", "Sim2Real", "RL"):
         rows = [
             position
@@ -501,37 +543,19 @@ def build_figure(
         )
     )
 
-    base_count = len(traces)
-    for position, name in enumerate(objective_names):
-        field = objectives[:, position].reshape(grid_size, grid_size)
-        traces.append(
-            go.Heatmap(
-                x=axis,
-                y=axis,
-                z=field,
-                name=name,
-                colorscale="Viridis",
-                opacity=0.72,
-                showscale=True,
-                colorbar={"title": name, "thickness": 12, "len": 0.6},
-                hovertemplate=f"{name} %{{z:.3f}}<br>(%{{x:.2f}}, %{{y:.2f}})<extra></extra>",
-                visible=False,
-            )
-        )
-
     buttons = [
         {
             "label": "Papers + gaps",
             "method": "update",
             "args": [
-                {"visible": [True] * base_count + [False] * len(objective_names)},
+                {"visible": [False] * heatmap_count + [True] * (len(traces) - heatmap_count)},
                 {"title.text": "ResearchRadar — Knowledge Manifold and practical Pareto gaps"},
             ],
         }
     ]
     for position, name in enumerate(objective_names):
-        visibility = [True] * base_count + [False] * len(objective_names)
-        visibility[base_count + position] = True
+        visibility = [False] * heatmap_count + [True] * (len(traces) - heatmap_count)
+        visibility[position] = True
         buttons.append(
             {
                 "label": name,
@@ -1064,12 +1088,24 @@ def render_markdown(
 # --------------------------------------------------------------------------- #
 # Orchestration
 # --------------------------------------------------------------------------- #
+def read_json(path: Path) -> dict[str, Any]:
+    """Load a JSON artifact, turning missing/corrupt files into a clear error."""
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except FileNotFoundError as exc:
+        raise SystemExit(f"Missing artifact {path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"Artifact {path} is not valid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise SystemExit(f"Artifact {path} must contain a JSON object")
+    return payload
+
+
 def load_inputs(paths: Paths) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Load corpus, grid archive, and Pareto solutions."""
-    with paths.corpus.open("r", encoding="utf-8") as handle:
-        corpus = json.load(handle)
-    with paths.pareto_json.open("r", encoding="utf-8") as handle:
-        front = json.load(handle)
+    corpus = read_json(paths.corpus)
+    front = read_json(paths.pareto_json)
 
     with np.load(paths.grid_npz) as archive:
         grid_data: dict[str, Any] = {
@@ -1097,12 +1133,75 @@ def attach_anchor_evidence(
         solution["archetype"] = archetype_of.get(index, "—")
 
 
+def render_prompt_text(
+    template: str, x: float, y: float, evidence: dict[str, Any]
+) -> tuple[str, str]:
+    """Fill the verbatim Appendix A.1 template with one gap's evidence package.
+
+    Returns ``(filename, prompt_text)``. The template body is copied unchanged
+    apart from the ``evidence_point_<x>_<y>.json`` placeholder; in particular the
+    text is never stripped, because the template's final line ends in a space and
+    ``.rstrip()`` would make the reproduced prompt differ from the paper.
+
+    This is the single source of truth for prompt rendering: ``src.report`` and
+    ``src.dashboard`` both call it, so the pasted prompt and the on-screen prompt
+    cannot diverge.
+    """
+    filename = f"evidence_point_{x:+.2f}_{y:+.2f}.json"
+    evidence_json = json.dumps(evidence, indent=2, ensure_ascii=False)
+    filled = template.replace("evidence_point_<x>_<y>.json", filename)
+    prompt_text = f"{filled}\n--- attached: {filename} ---\n{evidence_json}\n"
+    return filename, prompt_text
+
+
+def build_gap_packages(
+    corpus: dict[str, Any],
+    grid_data: dict[str, Any],
+    front: dict[str, Any],
+    config: dict[str, Any],
+    limit: int | None = None,
+) -> tuple[Vocabulary, dict[int, dict[str, Any]]]:
+    """Build the evidence package for every practical Pareto gap.
+
+    ``limit`` restricts the work to the first ``limit`` gaps by rank; the report
+    only needs the archetype representatives, while the dashboard needs all of
+    them.
+    """
+    papers = corpus["papers"]
+    regime_labels = [
+        str(regime.get("label", f"Regime {regime['id']}"))
+        for regime in config.get("regimes", [])
+    ]
+    if not regime_labels:
+        regime_labels = sorted({str(paper["regime_label"]) for paper in papers})
+
+    vocabulary = build_vocabulary(papers)
+    # Archetype labels, N_eff, and top-3 anchors are derived per solution and are
+    # needed by every consumer (the report's front table and the dashboard's
+    # scorecard), so they are attached here rather than by a caller.
+    attach_anchor_evidence(front, grid_data, papers)
+    solutions = front["solutions"]
+    wanted = (
+        solutions
+        if limit is None
+        else [solution for solution in solutions if solution["rank"] <= limit]
+    )
+
+    packages: dict[int, dict[str, Any]] = {}
+    for solution in wanted:
+        package = build_evidence_package(
+            solution, grid_data, vocabulary, papers, regime_labels
+        )
+        packages[int(solution["grid_index"])] = package
+    LOGGER.info("Evidence packages: %d gaps", len(packages))
+    return vocabulary, packages
+
+
 def write_outputs(
     config: dict[str, Any], paths: Paths, template_path: Path
 ) -> dict[str, Any]:
     """Generate both output artifacts and return a summary of what was written."""
     corpus, grid_data, front = load_inputs(paths)
-    papers = corpus["papers"]
     metadata = front["metadata"]
     objective_names = list(metadata["objective_names"])
 
@@ -1113,52 +1212,18 @@ def write_outputs(
         )
     template = template_path.read_text(encoding="utf-8")
 
-    regime_labels = [
-        str(regime.get("label", f"Regime {regime['id']}"))
-        for regime in config.get("regimes", [])
-    ]
-    if not regime_labels:
-        regime_labels = [str(label) for label in np.unique(
-            [paper["regime_label"] for paper in papers]
-        )]
-
-    vocabulary = build_vocabulary(papers)
-    attach_anchor_evidence(front, grid_data, papers)
-
-    packages: dict[int, dict[str, Any]] = {}
-    needed = {int(solution["grid_index"]) for solution in front["solutions"]}
-    for archetype in front["archetypes"][:3]:
-        needed.add(int(archetype["representative"]["grid_index"]))
-    for grid_index in sorted(needed):
-        point = next(
-            solution
-            for solution in front["solutions"]
-            if int(solution["grid_index"]) == grid_index
-        )
-        package = build_evidence_package(
-            point, grid_data, vocabulary, papers, regime_labels
-        )
-        package["shared_terms"] = [
-            entry["term"]
-            for entry in package["theme_lens_L2"]
-            if entry["in_both_lenses"]
-        ]
-        packages[grid_index] = package
+    vocabulary, packages = build_gap_packages(corpus, grid_data, front, config)
 
     primary = front["solutions"][0]
     primary_package = packages[int(primary["grid_index"])]
     evidence_json = json.dumps(
         prompt_evidence_package(primary_package), indent=2, ensure_ascii=False
     )
-    filename = f"evidence_point_{primary['x']:+.2f}_{primary['y']:+.2f}.json"
-    filled = template.replace("evidence_point_<x>_<y>.json", filename)
-    # Do not strip ``filled``: the template's final line ends in a space, and
-    # rstrip() would make the reproduced prompt differ from Appendix A.1. The
-    # attachment is appended after a blank line so the template body stays exact.
-    prompt_text = (
-        f"{filled}\n"
-        f"--- attached: {filename} ---\n"
-        f"{evidence_json}\n"
+    _filename, prompt_text = render_prompt_text(
+        template,
+        float(primary["x"]),
+        float(primary["y"]),
+        prompt_evidence_package(primary_package),
     )
 
     figure = build_figure(corpus, grid_data, front, objective_names)

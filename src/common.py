@@ -29,6 +29,8 @@ class Paths:
     pareto_json: Path
     html: Path
     report: Path
+    dashboard: Path
+    dashboard_template: Path
 
 
 def configure_logging(level: str = "INFO") -> None:
@@ -81,4 +83,10 @@ def resolve_paths(config: dict[str, Any], config_path: Path) -> Paths:
         html=config_dir / str(output_cfg.get("html_path", "output/radar_map.html")),
         report=config_dir
         / str(output_cfg.get("report_path", "output/RADAR_REPORT.md")),
+        dashboard=config_dir
+        / str(output_cfg.get("dashboard_path", "output/index.html")),
+        dashboard_template=config_dir
+        / str(
+            output_cfg.get("dashboard_template", "templates/dashboard.html")
+        ),
     )

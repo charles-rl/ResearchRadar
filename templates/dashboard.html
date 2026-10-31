@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ResearchRadar — Knowledge Manifold Operations</title>
+<meta name="description" content="Interactive Knowledge Manifold Optimization dashboard for a 120-paper robot-learning corpus: 33 Pareto-optimal supported knowledge gaps with evidence packages and paste-ready LLM prompts.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<!-- Pinned CDN assets carry SRI hashes so a compromised or tampered CDN cannot
+     inject script into a page that is opened from the local filesystem. Google
+     Fonts CSS is omitted: it varies per user agent and cannot be hashed. -->
+<script src="https://cdn.tailwindcss.com/3.4.16"
+        integrity="sha384-mS5Uq7sE90lgbBDN8xgf34ibEgbZo4gB3tfLY40ZRle+M188BQw8onzNHg6GUZaA"
+        crossorigin="anonymous"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink: '#0b0f19',
+          panel: '#1e293b',
+          panelDeep: '#141c2b'
+        },
+        fontFamily: {
+          sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
+          mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace']
+        }
+      }
+    }
+  };
+</script>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"
+        integrity="sha384-cCVCZkAjYNxaYKbM8lsArLznDF/SvMFr1jcZrvOpSTCa0W40ZAdLzHCEulnUa5i7"
+        crossorigin="anonymous"></script>
+<script src="https://unpkg.com/lucide@0.544.0/dist/umd/lucide.min.js"
+        integrity="sha384-hK2uiaqTSh/v1VqRxmuMQL4xmt5n0DdyBCOItx2fAs7Wv+WC8Tu0yDW1j12JooyM"
+        crossorigin="anonymous"></script>
+<style>
+  html { color-scheme: dark; }
+  body { background-color: #0b0f19; }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #334155; border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { background: #475569; }
+  .layer-btn { transition: background-color .15s, border-color .15s, color .15s, box-shadow .15s; }
+  .layer-btn[aria-pressed="true"] { background-color: rgba(255,255,255,.09); box-shadow: inset 0 0 0 1px rgba(255,255,255,.28); }
+  .arc-A { color: #22d3ee; }
+  .arc-B { color: #fbbf24; }
+  .arc-C { color: #c084fc; }
+  .chip-dot { width: 8px; height: 8px; border-radius: 9999px; display: inline-block; }
+  .weight-bar { height: 3px; border-radius: 9999px; background: rgba(148,163,184,.22); overflow: hidden; }
+  .weight-bar > i { display: block; height: 100%; border-radius: 9999px; background: linear-gradient(90deg,#22d3ee,#34d399); }
+  .mixture-bar { height: 6px; border-radius: 9999px; overflow: hidden; display: flex; background: rgba(148,163,184,.15); }
+  .mixture-bar > i { display: block; height: 100%; }
+  #drawer-scroll { scrollbar-gutter: stable; }
+  .fade-in { animation: fade .22s ease-out; }
+  @keyframes fade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+  .lens-table td { padding: 2px 0; vertical-align: top; }
+  .prompt-pre { tab-size: 2; }
+  .clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+</style>
+</head>
+<body class="min-h-screen bg-ink font-sans text-slate-200 antialiased lg:flex lg:h-screen lg:flex-col lg:overflow-hidden">
+
+<script id="radar-data" type="application/json">__RADAR_DATA__</script>
+
+<noscript>
+  <p style="padding:1rem;color:#fca5a5">This dashboard needs JavaScript. The same numbers are in output/RADAR_REPORT.md.</p>
+</noscript>
+
+<!-- ───────────────────────────── header ───────────────────────────── -->
+<header class="z-20 flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-b border-white/5 bg-panelDeep/70 px-4 py-2.5 backdrop-blur sm:px-5">
+  <div class="flex items-center gap-3">
+    <div class="grid h-9 w-9 place-items-center rounded-lg border border-cyan-400/25 bg-cyan-400/10">
+      <i data-lucide="radar" class="h-[18px] w-[18px] text-cyan-300"></i>
+    </div>
+    <div class="leading-tight">
+      <h1 class="text-[15px] font-semibold tracking-tight text-white">ResearchRadar</h1>
+      <p class="text-[10.5px] uppercase tracking-[0.14em] text-slate-500">Knowledge Manifold Operations</p>
+    </div>
+  </div>
+
+  <div id="metric-chips" class="flex flex-wrap items-center gap-1.5"></div>
+
+  <div class="ml-auto flex items-center gap-1.5 text-[10.5px] text-slate-500">
+    <i data-lucide="mouse-pointer-click" class="h-3.5 w-3.5"></i>
+    <span class="hidden sm:inline">Click a star to inspect its evidence package</span>
+    <span class="sm:hidden">Tap a star to inspect</span>
+  </div>
+</header>
+
+<main class="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_clamp(360px,32vw,470px)]">
+
+  <!-- ──────────────────────── left: manifold ──────────────────────── -->
+  <section class="relative flex min-h-[62vh] flex-col lg:min-h-0">
+    <div class="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-white/5 bg-ink/60 px-3 py-2">
+      <span class="mr-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Field layer</span>
+      <button class="layer-btn rounded-md border border-white/10 px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:text-white" data-layer="none" aria-pressed="true">
+        Papers + gaps
+      </button>
+      <button class="layer-btn rounded-md border border-white/10 px-2.5 py-1 font-mono text-[11px] text-cyan-300 hover:text-white" data-layer="P_boundary" aria-pressed="false">
+        P<sub class="text-[8px]">boundary</sub>
+      </button>
+      <button class="layer-btn rounded-md border border-white/10 px-2.5 py-1 font-mono text-[11px] text-amber-300 hover:text-white" data-layer="W" aria-pressed="false">W</button>
+      <button class="layer-btn rounded-md border border-white/10 px-2.5 py-1 font-mono text-[11px] text-emerald-300 hover:text-white" data-layer="G" aria-pressed="false">G</button>
+      <button class="layer-btn rounded-md border border-white/10 px-2.5 py-1 font-mono text-[11px] text-violet-300 hover:text-white" data-layer="S" aria-pressed="false">S</button>
+      <span id="layer-note" class="ml-1 hidden text-[10.5px] text-slate-500 md:inline"></span>
+    </div>
+
+    <div class="relative min-h-0 flex-1">
+      <div id="manifold" class="absolute inset-0"></div>
+      <div class="pointer-events-none absolute bottom-2 left-3 font-mono text-[10px] text-slate-600">
+        Ω = [−1, 1]² · 21×21 candidates · 120 documents
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────── right: evidence drawer ───────────────────── -->
+  <aside class="flex min-h-0 flex-col border-t border-white/5 bg-panel/40 lg:border-l lg:border-t-0">
+    <div class="flex shrink-0 items-center gap-2 border-b border-white/5 px-3 py-2">
+      <button id="prev-btn" class="rounded-md border border-white/10 p-1 text-slate-400 hover:text-white" title="Previous gap (left arrow)" aria-label="Previous gap">
+        <i data-lucide="chevron-left" class="h-4 w-4"></i>
+      </button>
+      <button id="next-btn" class="rounded-md border border-white/10 p-1 text-slate-400 hover:text-white" title="Next gap (right arrow)" aria-label="Next gap">
+        <i data-lucide="chevron-right" class="h-4 w-4"></i>
+      </button>
+      <select id="gap-select" class="min-w-0 flex-1 rounded-md border border-white/10 bg-panelDeep px-2 py-1 font-mono text-[11px] text-slate-300 outline-none focus:border-cyan-400/50" aria-label="Select a Pareto gap"></select>
+      <span id="gap-arch" class="shrink-0 rounded border border-white/10 px-1.5 py-0.5 font-mono text-[10px] text-slate-400"></span>
+    </div>
+
+    <div id="drawer-scroll" class="min-h-0 flex-1 overflow-y-auto">
+
+      <div class="border-b border-white/5 px-4 pb-3 pt-3">
+        <div class="flex items-baseline justify-between gap-2">
+          <div class="flex items-baseline gap-2">
+            <span class="font-mono text-[26px] font-bold leading-none text-white" id="gap-rank">#1</span>
+            <span class="text-[11px] uppercase tracking-[0.14em] text-slate-500">supported gap</span>
+          </div>
+          <span id="gap-dideal" class="font-mono text-[11px] text-slate-400" title="Euclidean distance to the ideal corner (1, 1, 1, 1)"></span>
+        </div>
+        <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-slate-400">
+          <span class="text-slate-500">chart</span>
+          <span id="gap-coords" class="text-cyan-300"></span>
+          <span id="gap-boundary-badge" class="hidden rounded border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 text-[9.5px] uppercase tracking-wider text-amber-300">outer edge</span>
+        </div>
+      </div>
+
+      <div class="border-b border-white/5 px-3 py-3">
+        <div class="mb-1 flex items-center justify-between px-1">
+          <span class="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Objective scorecard</span>
+          <span class="text-[9.5px] text-slate-600">0 to 1, higher is better</span>
+        </div>
+        <div id="radar" class="h-[210px] w-full"></div>
+        <div id="stats" class="mt-1 grid grid-cols-2 gap-1.5"></div>
+      </div>
+
+      <div class="border-b border-white/5 px-4 py-3">
+        <div class="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Regime mixture at this location</div>
+        <div id="mixture"></div>
+      </div>
+
+      <div class="border-b border-white/5 px-3 py-3">
+        <div class="mb-2 flex items-center justify-between px-1">
+          <span class="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Top 5 contributing anchor papers</span>
+          <span class="text-[9.5px] text-slate-600">SPH weight</span>
+        </div>
+        <div id="anchors" class="space-y-1.5"></div>
+      </div>
+
+      <div class="border-b border-white/5 px-3 py-3">
+        <div class="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Lexical lens breakdown</div>
+
+        <div class="mb-3">
+          <div class="mb-1 flex items-center gap-1.5 px-1">
+            <span class="chip-dot" style="background:#22d3ee"></span>
+            <span class="text-[10.5px] font-medium text-slate-300">L2 theme lens</span>
+            <span class="text-[9.5px] text-slate-600">local research theme</span>
+          </div>
+          <div id="lens-theme" class="flex flex-wrap gap-1"></div>
+        </div>
+
+        <div class="mb-3">
+          <div class="mb-1 flex items-center gap-1.5 px-1">
+            <span class="chip-dot" style="background:#34d399"></span>
+            <span class="text-[10.5px] font-medium text-slate-300">Emergent shared topics</span>
+            <span class="rounded bg-emerald-400/10 px-1 font-mono text-[9px] text-emerald-300">df &ge; 4</span>
+          </div>
+          <div id="lens-emergent"></div>
+        </div>
+
+        <div>
+          <div class="mb-1 flex items-center gap-1.5 px-1">
+            <span class="chip-dot" style="background:#f472b6"></span>
+            <span class="text-[10.5px] font-medium text-slate-300">Limited-source hypotheses</span>
+            <span class="rounded bg-pink-400/10 px-1 font-mono text-[9px] text-pink-300">df &le; 3</span>
+          </div>
+          <div id="lens-limited"></div>
+        </div>
+      </div>
+
+      <div class="px-3 py-3">
+        <div class="mb-2 flex items-center justify-between gap-2 px-1">
+          <div>
+            <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Appendix A.1 prompt</div>
+            <div class="text-[9.5px] text-slate-600">verbatim template, pre-filled for this gap</div>
+          </div>
+          <div class="flex shrink-0 items-center gap-1.5">
+            <button id="download-btn" class="rounded-md border border-white/10 p-1.5 text-slate-400 hover:text-white" title="Download prompt as .txt" aria-label="Download prompt">
+              <i data-lucide="download" class="h-3.5 w-3.5"></i>
+            </button>
+            <button id="copy-btn" class="flex items-center gap-1.5 rounded-md border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-1.5 text-[11px] font-medium text-cyan-200 hover:bg-cyan-400/20">
+              <i data-lucide="copy" class="h-3.5 w-3.5"></i>
+              <span id="copy-label">Copy prompt</span>
+            </button>
+          </div>
+        </div>
+        <pre id="prompt" class="prompt-pre max-h-[340px] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-white/10 bg-panelDeep p-3 font-mono text-[10.5px] leading-relaxed text-slate-300"></pre>
+      </div>
+
+    </div>
+  </aside>
+</main>
+
+<script>
+"use strict";
+
+/* ────────────────────────── data ────────────────────────── */
+function readPayload() {
+  const node = document.getElementById("radar-data");
+  try {
+    return JSON.parse(node.textContent);
+  } catch (error) {
+    const banner = document.createElement("p");
+    banner.style.cssText = "padding:1rem;color:#fca5a5;font-family:monospace";
+    banner.textContent = "Embedded data payload could not be parsed: " + error.message;
+    document.body.prepend(banner);
+    throw error;
+  }
+}
+
+const DATA = readPayload();
+
+const REGIME_COLOR = {};
+DATA.regimes.forEach(function (regime) { REGIME_COLOR[regime.label] = regime.color; });
+
+const ARC_COLOR = {
+  "Archetype A": "#22d3ee",
+  "Archetype B": "#fbbf24",
+  "Archetype C": "#c084fc"
+};
+
+const ARC_CLASS = {
+  "Archetype A": "arc-A",
+  "Archetype B": "arc-B",
+  "Archetype C": "arc-C"
+};
+
+/* Dark-friendly field gradients, one hue per objective. */
+const FIELD_STYLE = {
+  P_boundary: { from: "rgba(8,145,178,0)", via: "rgba(34,211,238,0.35)", to: "rgba(165,243,252,0.92)" },
+  W: { from: "rgba(180,83,9,0)", via: "rgba(251,191,36,0.35)", to: "rgba(254,243,199,0.92)" },
+  G: { from: "rgba(5,150,105,0)", via: "rgba(52,211,153,0.35)", to: "rgba(209,250,229,0.92)" },
+  S: { from: "rgba(109,40,217,0)", via: "rgba(192,132,252,0.35)", to: "rgba(237,233,254,0.92)" }
+};
+
+const state = { gapIndex: 0, layer: "none", radarReady: false };
+
+/* ────────────────────────── DOM helpers ──────────────────────────
+ * Everything is built as real nodes. Note text is assigned via textContent and
+ * URLs/classes via setAttribute, so corpus text can never become markup. The
+ * only place HTML strings are used at all is Plotly hovertext, which Plotly
+ * renders itself; those strings are escaped by esc().
+ */
+function el(tag, attrs, children) {
+  const node = document.createElement(tag);
+  if (attrs) {
+    Object.keys(attrs).forEach(function (key) {
+      const value = attrs[key];
+      if (value === null || value === undefined || value === false) return;
+      if (key === "class") node.className = value;
+      else if (key === "text") node.textContent = String(value);
+      else if (key === "style") Object.assign(node.style, value);
+      else if (key === "dataset") Object.assign(node.dataset, value);
+      else node.setAttribute(key, value === true ? "" : String(value));
+    });
+  }
+  append(node, children);
+  return node;
+}
+
+function append(parent, children) {
+  if (children === null || children === undefined || children === false) return;
+  if (Array.isArray(children)) {
+    children.forEach(function (child) { append(parent, child); });
+    return;
+  }
+  const node = children instanceof Node ? children : document.createTextNode(String(children));
+  parent.append(node);
+}
+
+function svgIcon(name, className) {
+  return el("i", { "data-lucide": name, class: className });
+}
+
+function clear(node) {
+  while (node.firstChild) node.removeChild(node.firstChild);
+}
+
+function esc(value) {
+  return String(value === null || value === undefined ? "" : value)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function fmt(value, digits) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "—";
+  return number.toFixed(digits === null || digits === undefined ? 3 : digits);
+}
+
+function signed(value, digits) {
+  const number = Number(value);
+  const places = digits === null || digits === undefined ? 2 : digits;
+  return (number >= 0 ? "+" : "") + number.toFixed(places);
+}
+
+function hexToRgba(hex, alpha) {
+  const value = String(hex).replace("#", "");
+  const r = parseInt(value.slice(0, 2), 16);
+  const g = parseInt(value.slice(2, 4), 16);
+  const b = parseInt(value.slice(4, 6), 16);
+  return "rgba(" + r + "," + g + "," + b + "," + alpha + ")";
+}
+
+function icons() {
+  if (window.lucide && typeof window.lucide.createIcons === "function") {
+    window.lucide.createIcons();
+  }
+}
+
+/* ────────────────────────── header chips ────────────────────────── */
+function renderHeader() {
+  const meta = DATA.meta;
+  const chips = [
+    ["file-text", meta.papers + " papers"],
+    ["star", meta.gaps + " practical gaps"],
+    ["boxes", meta.archetypes + " archetypes"],
+    ["activity", "stress " + fmt(meta.stress, 2)],
+    ["git-branch", "rho " + fmt(meta.spearman, 4)],
+    ["cpu", meta.model]
+  ];
+  const host = document.getElementById("metric-chips");
+  clear(host);
+  chips.forEach(function (chip) {
+    append(host, el("span", {
+      class: "flex items-center gap-1.5 rounded-md border border-white/5 bg-white/[0.04] px-2 py-1 font-mono text-[10.5px] text-slate-400"
+    }, [svgIcon(chip[0], "h-3 w-3 text-slate-500"), el("span", { text: chip[1] })]));
+  });
+  icons();
+}
+
+/* ────────────────────────── manifold ────────────────────────── */
+function heatmapTrace(field, axis) {
+  const style = FIELD_STYLE[field.name] || FIELD_STYLE.P_boundary;
+  return {
+    type: "heatmap",
+    name: field.name,
+    x: axis,
+    y: axis,
+    z: field.z,
+    visible: false,
+    opacity: 0.92,
+    zsmooth: "best",
+    hoverinfo: "skip",
+    showscale: false,
+    colorscale: [[0, style.from], [0.5, style.via], [1, style.to]],
+    colorbar: {
+      title: { text: field.name, font: { family: "JetBrains Mono, monospace", size: 10, color: "#94a3b8" } },
+      thickness: 8,
+      len: 0.55,
+      x: 1.005,
+      tickfont: { family: "JetBrains Mono, monospace", size: 9, color: "#64748b" },
+      outlinewidth: 0,
+      bgcolor: "rgba(0,0,0,0)"
+    },
+    contours: { show: true, color: "rgba(255,255,255,0.16)", width: 1 },
+    showlegend: false
+  };
+}
+
+function paperTrace(regime) {
+  const rows = DATA.papers.filter(function (paper) { return paper.regime_label === regime.label; });
+  return {
+    type: "scatter",
+    mode: "markers",
+    name: regime.label,
+    x: rows.map(function (p) { return p.x; }),
+    y: rows.map(function (p) { return p.y; }),
+    text: rows.map(function (p) {
+      return "<b>" + esc(p.title) + "</b><br>" +
+        esc(p.authors.join(", ")) + (p.author_count > 3 ? " et al." : "") + "<br>" +
+        p.year + " · " + esc(p.regime_label) + "<br>" +
+        '<span style="color:#94a3b8">arXiv ' + esc(p.id) + "</span>";
+    }),
+    hoverinfo: "text",
+    marker: {
+      size: 8.5,
+      color: regime.color,
+      opacity: 0.82,
+      line: { width: 0.7, color: "rgba(11,15,25,0.9)" }
+    }
+  };
+}
+
+function gapHover(gap) {
+  const anchors = gap.anchors.slice(0, 3).map(function (anchor) {
+    return "&nbsp;&nbsp;" + fmt(anchor.weight, 3) + " · " + esc(anchor.title.slice(0, 62));
+  }).join("<br>");
+  const o = gap.objectives;
+  return "<b>Gap #" + gap.rank + "</b> · " + esc(gap.archetype) + "<br>" +
+    "chart (" + signed(gap.x) + ", " + signed(gap.y) + ")<br>" +
+    '<span style="color:#67e8f9">P</span> ' + fmt(o.P_boundary) +
+    ' <span style="color:#fcd34d">W</span> ' + fmt(o.W) +
+    ' <span style="color:#6ee7b7">G</span> ' + fmt(o.G) +
+    ' <span style="color:#d8b4fe">S</span> ' + fmt(o.S) + "<br>" +
+    "d<sub>ideal</sub> " + fmt(gap.d_ideal, 3) + " · N<sub>eff</sub> " + fmt(gap.n_eff, 1) + "<br>" +
+    '<i style="color:#94a3b8">top contributors</i><br>' + anchors;
+}
+
+function buildManifold() {
+  const axis = DATA.axis;
+  const traces = [];
+  const index = {};
+  /* One owner key per trace, parallel to `traces`. `setLayer` builds its
+     visibility array from this rather than from Object.keys(index), because the
+     halo traces are pushed in a loop and never get an index entry - keying off
+     the index object produced an 11-element array for a 14-trace figure and
+     silently shifted visibility onto the wrong traces. */
+  const owners = [];
+  const own = function (key, trace) {
+    owners.push(key);
+    traces.push(trace);
+    return traces.length - 1;
+  };
+
+  DATA.fields.forEach(function (field) {
+    const key = "field:" + field.name;
+    index[key] = own(key, heatmapTrace(field, axis));
+  });
+
+  DATA.regimes.forEach(function (regime) {
+    const key = "regime:" + regime.label;
+    index[key] = own(key, paperTrace(regime));
+  });
+
+  const gaps = DATA.gaps;
+  const top = gaps[0];
+  const xs = gaps.map(function (g) { return g.x; });
+  const ys = gaps.map(function (g) { return g.y; });
+
+  /* Soft glow beneath every gap marker. */
+  index.halo = own("halo", {
+    type: "scatter", mode: "markers", x: xs, y: ys, hoverinfo: "skip", showlegend: false,
+    marker: { symbol: "star", size: 27, color: "#f472b6", opacity: 0.16, line: { width: 0 } }
+  });
+
+  /* The clickable gap markers. pointNumber === index into DATA.gaps. */
+  index.gaps = own("gaps", {
+    type: "scatter", mode: "markers", name: "Supported Knowledge Gaps",
+    x: xs, y: ys,
+    text: gaps.map(gapHover),
+    hoverinfo: "text",
+    marker: { symbol: "star", size: 13, color: "#fce7f3", line: { width: 1.2, color: "#f472b6" } },
+    customdata: gaps.map(function (g) { return g.rank; })
+  });
+
+  /* #1 compromise: concentric halos in separate traces so they stack. */
+  [62, 42, 27].forEach(function (size, step) {
+    own("topHalo", {
+      type: "scatter", mode: "markers", x: [top.x], y: [top.y], hoverinfo: "skip",
+      showlegend: false, name: "top halo " + step,
+      marker: { symbol: "circle", size: size, color: "#fbbf24", opacity: [0.07, 0.12, 0.2][step], line: { width: 0 } }
+    });
+  });
+
+  index.topStar = own("topStar", {
+    type: "scatter", mode: "markers", name: "#1 compromise", x: [top.x], y: [top.y],
+    text: [gapHover(top)], hoverinfo: "text",
+    marker: { symbol: "star", size: 22, color: "#fbbf24", line: { width: 1.4, color: "#78350f" } }
+  });
+
+  /* Selection ring, repositioned with Plotly.restyle. */
+  index.selection = own("selection", {
+    type: "scatter", mode: "markers", x: [top.x], y: [top.y], hoverinfo: "skip",
+    showlegend: false, name: "selection",
+    marker: { symbol: "circle-open", size: 30, color: "#a5f3fc", line: { width: 2 } }
+  });
+
+  const layout = {
+    paper_bgcolor: "#0b0f19",
+    plot_bgcolor: "#0b0f19",
+    font: { family: "Inter, system-ui, sans-serif", size: 11, color: "#94a3b8" },
+    margin: { l: 46, r: 18, t: 16, b: 40 },
+    hovermode: "closest",
+    hoverlabel: {
+      bgcolor: "rgba(15,23,42,0.96)", bordercolor: "#334155",
+      font: { family: "Inter, system-ui, sans-serif", size: 11.5, color: "#e2e8f0" },
+      align: "left"
+    },
+    xaxis: {
+      title: { text: "knowledge manifold x", font: { size: 10, color: "#64748b" } },
+      range: [-1.09, 1.09], zeroline: true, zerolinecolor: "rgba(148,163,184,0.22)",
+      gridcolor: "rgba(148,163,184,0.08)",
+      tickfont: { family: "JetBrains Mono, monospace", size: 9.5, color: "#64748b" },
+      dtick: 0.5, constrain: "domain"
+    },
+    yaxis: {
+      title: { text: "knowledge manifold y", font: { size: 10, color: "#64748b" } },
+      range: [-1.09, 1.09], zeroline: true, zerolinecolor: "rgba(148,163,184,0.22)",
+      gridcolor: "rgba(148,163,184,0.08)",
+      tickfont: { family: "JetBrains Mono, monospace", size: 9.5, color: "#64748b" },
+      dtick: 0.5, scaleanchor: "x", scaleratio: 1
+    },
+    legend: {
+      orientation: "h", x: 0.01, y: 0.01, xanchor: "left", yanchor: "bottom",
+      bgcolor: "rgba(11,15,25,0.72)", bordercolor: "rgba(148,163,184,0.18)", borderwidth: 1,
+      font: { size: 10.5, color: "#cbd5e1" }, itemsizing: "constant"
+    },
+    annotations: [{
+      x: top.x, y: top.y, text: "#1 compromise",
+      showarrow: true, arrowhead: 0, arrowwidth: 1, arrowcolor: "rgba(251,191,36,0.65)",
+      ax: top.x > 0 ? -46 : 46, ay: -34,
+      font: { family: "JetBrains Mono, monospace", size: 10, color: "#fcd34d" },
+      bgcolor: "rgba(11,15,25,0.85)", bordercolor: "rgba(251,191,36,0.35)",
+      borderwidth: 1, borderpad: 3
+    }]
+  };
+
+  const config = {
+    responsive: true, displaylogo: false, scrollZoom: true,
+    modeBarButtonsToRemove: ["select2d", "lasso2d", "autoScale2d", "toggleSpikelines"],
+    toImageButtonOptions: { filename: "researchradar_manifold", scale: 2 }
+  };
+
+  Plotly.newPlot("manifold", traces, layout, config).then(function () {
+    const node = document.getElementById("manifold");
+    node.on("plotly_click", function (event) {
+      const point = event.points && event.points[0];
+      if (!point) return;
+      if (point.data.name === "Supported Knowledge Gaps") selectGap(Number(point.pointNumber));
+      else if (point.data.name === "#1 compromise") selectGap(0);
+    });
+    if (window.ResizeObserver) {
+      new ResizeObserver(function () { Plotly.Plots.resize(node); }).observe(node.parentElement);
+    }
+  });
+
+  index.owners = owners;
+  return index;
+}
+
+/* ────────────────────────── drawer ────────────────────────── */
+function statCell(label, value, hint) {
+  return el("div", {
+    class: "rounded-md border border-white/5 bg-white/[0.03] px-2 py-1.5",
+    title: hint || ""
+  }, [
+    el("div", { class: "text-[9px] uppercase tracking-[0.1em] text-slate-500", text: label }),
+    el("div", { class: "font-mono text-[13px] text-slate-100", text: value })
+  ]);
+}
+
+function renderRadar(gap) {
+  const o = gap.objectives;
+  const values = [o.P_boundary, o.W, o.G, o.S];
+  const labels = ["P boundary", "W novelty", "G gradient", "S support"];
+  const color = ARC_COLOR[gap.archetype] || "#22d3ee";
+
+  const trace = {
+    type: "scatterpolar",
+    mode: "lines+markers+text",
+    r: values.concat([values[0]]),
+    theta: labels.concat([labels[0]]),
+    fill: "toself",
+    fillcolor: hexToRgba(color, 0.16),
+    line: { color: color, width: 2 },
+    marker: { size: 5, color: color },
+    text: values.map(function (v) { return fmt(v, 2); }).concat([""]),
+    textposition: "middle right",
+    textfont: { family: "JetBrains Mono, monospace", size: 9, color: "#e2e8f0" },
+    hoverinfo: "skip",
+    showlegend: false
+  };
+
+  const layout = {
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "rgba(0,0,0,0)",
+    font: { family: "JetBrains Mono, monospace", size: 9.5, color: "#94a3b8" },
+    margin: { l: 46, r: 46, t: 20, b: 20 },
+    polar: {
+      bgcolor: "rgba(20,28,43,0.55)",
+      radialaxis: {
+        range: [0, 1], showline: false, tickvals: [0.25, 0.5, 0.75, 1],
+        tickfont: { size: 8, color: "#475569" },
+        gridcolor: "rgba(148,163,184,0.14)", angle: 90
+      },
+      angularaxis: {
+        gridcolor: "rgba(148,163,184,0.18)",
+        tickfont: { family: "Inter, sans-serif", size: 9.5, color: "#cbd5e1" }
+      }
+    },
+    showlegend: false
+  };
+
+  if (state.radarReady) {
+    Plotly.react("radar", [trace], layout, { displayModeBar: false });
+  } else {
+    Plotly.newPlot("radar", [trace], layout, { displayModeBar: false, responsive: true });
+    state.radarReady = true;
+  }
+}
+
+function renderStats(gap) {
+  const host = document.getElementById("stats");
+  clear(host);
+  [
+    statCell("N_eff", fmt(gap.n_eff, 1), "Inverse Simpson effective number of contributing documents"),
+    statCell("d5", fmt(gap.d5, 3), "Distance to the fifth-nearest document"),
+    statCell("T3", fmt(gap.t3, 3), "Top-three weight concentration"),
+    statCell("H", fmt(gap.H, 3), "Normalized mixture entropy across regimes"),
+    statCell("u", fmt(gap.u, 4), "Relative GP uncertainty (diagnostic, not an objective)"),
+    statCell("rank", "#" + gap.rank + " / " + DATA.gaps.length, "Rank by distance to the ideal corner")
+  ].forEach(function (cell) { append(host, cell); });
+}
+
+function renderMixture(gap) {
+  const rows = DATA.regimes.map(function (regime) {
+    const entry = gap.mixture[regime.label] || { global: 0, adaptive: 0 };
+    return { label: regime.label, color: regime.color, global: entry.global, adaptive: entry.adaptive };
+  });
+  const total = rows.reduce(function (sum, r) { return sum + r.global; }, 0) || 1;
+
+  const bar = el("div", { class: "mixture-bar mb-1.5" }, rows.map(function (r) {
+    return el("i", { style: { width: (100 * r.global / total).toFixed(2) + "%", background: r.color } });
+  }));
+
+  const legend = el("div", null, rows.map(function (r) {
+    return el("div", { class: "flex items-center justify-between gap-2 py-0.5" }, [
+      el("span", { class: "flex items-center gap-1.5" }, [
+        el("span", { class: "chip-dot", style: { background: r.color } }),
+        el("span", { class: "text-[10.5px] text-slate-300", text: r.label })
+      ]),
+      el("span", { class: "font-mono text-[10.5px] text-slate-400" }, [
+        el("span", { text: fmt(r.global, 3) + " " }),
+        el("span", { class: "text-slate-600", text: "/ " + fmt(r.adaptive, 3) })
+      ])
+    ]);
+  }));
+
+  const note = el("div", {
+    class: "mt-1 text-[9px] text-slate-600",
+    text: "global SPH field / adaptive (8-NN) field"
+  });
+
+  const host = document.getElementById("mixture");
+  clear(host);
+  append(host, [bar, legend, note]);
+}
+
+function renderAnchors(gap) {
+  const maxWeight = Math.max.apply(null, gap.anchors.map(function (a) { return a.weight; })) || 1;
+  const host = document.getElementById("anchors");
+  clear(host);
+
+  gap.anchors.forEach(function (anchor, position) {
+    const color = REGIME_COLOR[anchor.regime] || "#94a3b8";
+    append(host, el("a", {
+      class: "block rounded-lg border border-white/5 bg-white/[0.03] p-2 transition hover:border-white/20 hover:bg-white/[0.06]",
+      href: anchor.url,
+      target: "_blank",
+      rel: "noopener noreferrer"
+    }, [
+      el("div", { class: "flex items-start gap-2" }, [
+        el("span", { class: "mt-0.5 font-mono text-[10px] text-slate-600", text: String(position + 1) }),
+        el("div", { class: "min-w-0 flex-1" }, [
+          el("div", { class: "clamp-2 text-[12px] leading-snug text-slate-100", text: anchor.title }),
+          el("div", {
+            class: "mt-0.5 truncate text-[10px] text-slate-500",
+            text: anchor.authors.join(", ") + " · " + anchor.year
+          }),
+          el("div", { class: "mt-1.5 flex items-center gap-1.5" }, [
+            el("span", {
+              class: "shrink-0 rounded px-1 py-[1px] font-mono text-[9px]",
+              style: { background: hexToRgba(color, 0.14), color: color },
+              text: anchor.regime
+            }),
+            el("span", { class: "weight-bar flex-1" }, [
+              el("i", { style: { width: Math.max(4, 100 * anchor.weight / maxWeight).toFixed(1) + "%" } })
+            ]),
+            el("span", { class: "shrink-0 font-mono text-[10px] text-slate-300", text: fmt(anchor.weight, 4) })
+          ])
+        ])
+      ])
+    ]));
+  });
+}
+
+function lensRow(term, df, extra, toneColor) {
+  return el("tr", { class: "border-t border-white/5" }, [
+    el("td", { class: "py-1 pr-2 font-mono text-[11px] text-slate-200", text: term }),
+    el("td", { class: "py-1 pr-2" }, [
+      el("span", {
+        class: "rounded px-1 py-[1px] font-mono text-[9px]",
+        style: { background: toneColor },
+        text: "df=" + df
+      })
+    ]),
+    el("td", { class: "py-1 text-[10px] text-slate-400" }, extra)
+  ]);
+}
+
+function lensTable(rows) {
+  return el("table", { class: "w-full lens-table" }, [el("tbody", null, rows)]);
+}
+
+function renderLenses(gap) {
+  const themeHost = document.getElementById("lens-theme");
+  clear(themeHost);
+  if (gap.theme_lens.length) {
+    gap.theme_lens.forEach(function (entry) {
+      append(themeHost, el("span", {
+        title: "word forms: " + entry.word_forms.join(", "),
+        class: "rounded border px-1.5 py-[2px] font-mono text-[10px] " + (entry.in_both_lenses
+          ? "border-cyan-400/40 bg-cyan-400/15 text-cyan-100"
+          : "border-white/10 bg-white/[0.04] text-slate-300")
+      }, [
+        el("span", { text: entry.term }),
+        el("span", { class: "ml-1 text-[8.5px] text-slate-500", text: String(entry.df) })
+      ]));
+    });
+  } else {
+    append(themeHost, el("span", { class: "text-[10px] text-slate-600", text: "no theme terms" }));
+  }
+
+  const emergentHost = document.getElementById("lens-emergent");
+  clear(emergentHost);
+  if (gap.emergent.length) {
+    append(emergentHost, lensTable(gap.emergent.map(function (entry) {
+      return lensRow(
+        entry.term, entry.df,
+        "x" + fmt(entry.enrichment, 2) + " local enrichment",
+        "rgba(52,211,153,0.14)"
+      );
+    })));
+  } else {
+    append(emergentHost, el("p", {
+      class: "px-1 text-[10px] text-slate-600",
+      text: "No concentration term reaches df >= 4 here, so everything is single- or two-source."
+    }));
+  }
+
+  const limitedHost = document.getElementById("lens-limited");
+  clear(limitedHost);
+  if (gap.limited.length) {
+    append(limitedHost, lensTable(gap.limited.map(function (entry) {
+      const sources = (entry.source_docs || []).map(function (source) {
+        return el("span", { class: "mr-2 inline-block" }, [
+          el("a", {
+            class: "text-cyan-400 hover:underline",
+            href: source.url,
+            target: "_blank",
+            rel: "noopener noreferrer",
+            text: source.doc
+          }),
+          el("span", { class: "ml-1 text-slate-600", text: fmt(source.weight, 3) })
+        ]);
+      });
+      return lensRow(
+        entry.term, entry.df,
+        sources.length ? sources : "not attested in a contributing document",
+        "rgba(244,114,182,0.14)"
+      );
+    })));
+    append(limitedHost, el("p", {
+      class: "mt-1 px-1 text-[9.5px] leading-relaxed text-slate-600",
+      text: "These terms are hypotheses attributed to the listed documents, not established regional knowledge."
+    }));
+  } else {
+    append(limitedHost, el("p", {
+      class: "px-1 text-[10px] text-slate-600",
+      text: "No df <= 3 terms surfaced at this location."
+    }));
+  }
+}
+
+function renderDrawer() {
+  const gap = DATA.gaps[state.gapIndex];
+
+  document.getElementById("gap-rank").textContent = "#" + gap.rank;
+  document.getElementById("gap-coords").textContent = "(" + signed(gap.x) + ", " + signed(gap.y) + ")";
+  document.getElementById("gap-dideal").textContent = "d_ideal " + fmt(gap.d_ideal, 4);
+
+  const archEl = document.getElementById("gap-arch");
+  archEl.textContent = gap.archetype;
+  archEl.className = "shrink-0 rounded border border-white/10 px-1.5 py-0.5 font-mono text-[10px] " +
+    (ARC_CLASS[gap.archetype] || "text-slate-400");
+
+  document.getElementById("gap-boundary-badge").classList.toggle("hidden", !gap.on_outer_boundary);
+
+  renderRadar(gap);
+  renderStats(gap);
+  renderMixture(gap);
+  renderAnchors(gap);
+  renderLenses(gap);
+
+  document.getElementById("prompt").textContent = gap.prompt;
+  document.getElementById("gap-select").value = String(state.gapIndex);
+
+  const scroll = document.getElementById("drawer-scroll");
+  scroll.classList.remove("fade-in");
+  void scroll.offsetWidth;
+  scroll.classList.add("fade-in");
+  icons();
+}
+
+/* ────────────────────────── interaction ────────────────────────── */
+let PLOT = {};
+
+function selectGap(index, options) {
+  const total = DATA.gaps.length;
+  state.gapIndex = ((index % total) + total) % total;
+  const gap = DATA.gaps[state.gapIndex];
+  renderDrawer();
+  Plotly.restyle("manifold", { x: [[gap.x]], y: [[gap.y]] }, [PLOT.selection]);
+  if (!options || options.updateHash !== false) {
+    history.replaceState(null, "", "#gap=" + gap.rank);
+  }
+}
+
+function setLayer(name) {
+  state.layer = name;
+  document.querySelectorAll("[data-layer]").forEach(function (button) {
+    button.setAttribute("aria-pressed", String(button.dataset.layer === name));
+  });
+
+  /* One entry per trace. Field traces follow the selection; everything else
+     (regime scatters, gap markers, halos, the selection ring) stays visible. */
+  const active = "field:" + name;
+  const visibility = (PLOT.owners || []).map(function (key) {
+    return key.startsWith("field:") ? key === active : true;
+  });
+  Plotly.restyle("manifold", { visible: visibility });
+
+  const note = document.getElementById("layer-note");
+  if (name === "none") {
+    note.textContent = "";
+  } else {
+    const field = DATA.fields.find(function (f) { return f.name === name; });
+    note.textContent = name + " · " + fmt(field.min, 3) + " to " + fmt(field.max, 3) + " across the grid";
+  }
+}
+
+async function copyPrompt() {
+  const text = DATA.gaps[state.gapIndex].prompt;
+  const label = document.getElementById("copy-label");
+  const button = document.getElementById("copy-btn");
+  let ok = false;
+
+  try {
+    await navigator.clipboard.writeText(text);
+    ok = true;
+  } catch (error) {
+    /* Clipboard API needs a secure context; fall back to a hidden textarea. */
+    try {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.cssText = "position:fixed;top:-1000px";
+      document.body.append(area);
+      area.select();
+      ok = document.execCommand("copy");
+      area.remove();
+    } catch (fallbackError) {
+      ok = false;
+    }
+  }
+
+  label.textContent = ok ? "Copied" : "Press Ctrl+C";
+  button.classList.toggle("border-emerald-400/40", ok);
+
+  if (!ok) {
+    const range = document.createRange();
+    range.selectNodeContents(document.getElementById("prompt"));
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  setTimeout(function () { label.textContent = "Copy prompt"; }, 1800);
+}
+
+function downloadPrompt() {
+  const gap = DATA.gaps[state.gapIndex];
+  const blob = new Blob([gap.prompt], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = gap.filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+}
+
+/* ────────────────────────── boot ────────────────────────── */
+function boot() {
+  renderHeader();
+
+  const select = document.getElementById("gap-select");
+  clear(select);
+  DATA.gaps.forEach(function (gap, index) {
+    append(select, el("option", {
+      value: String(index),
+      text: "Gap #" + gap.rank + " - (" + signed(gap.x) + ", " + signed(gap.y) + ") - " + gap.archetype
+    }));
+  });
+  select.addEventListener("change", function () { selectGap(Number(select.value)); });
+
+  document.getElementById("prev-btn").addEventListener("click", function () { selectGap(state.gapIndex - 1); });
+  document.getElementById("next-btn").addEventListener("click", function () { selectGap(state.gapIndex + 1); });
+  document.getElementById("copy-btn").addEventListener("click", copyPrompt);
+  document.getElementById("download-btn").addEventListener("click", downloadPrompt);
+
+  document.querySelectorAll("[data-layer]").forEach(function (button) {
+    button.addEventListener("click", function () { setLayer(button.dataset.layer); });
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.target && /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName)) return;
+    if (event.key === "ArrowLeft") { selectGap(state.gapIndex - 1); event.preventDefault(); }
+    if (event.key === "ArrowRight") { selectGap(state.gapIndex + 1); event.preventDefault(); }
+    if (event.key >= "1" && event.key <= "5") {
+      const layers = ["none"].concat(DATA.fields.map(function (f) { return f.name; }));
+      setLayer(layers[Number(event.key) - 1]);
+    }
+  });
+
+  PLOT = buildManifold();
+
+  let start = 0;
+  const match = /#gap=(\d+)/.exec(window.location.hash || "");
+  if (match) {
+    const rank = Number(match[1]);
+    const found = DATA.gaps.findIndex(function (gap) { return gap.rank === rank; });
+    if (found >= 0) start = found;
+  }
+  selectGap(start, { updateHash: false });
+  icons();
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", boot);
+} else {
+  boot();
+}
+</script>
+</body>
+</html>

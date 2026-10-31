@@ -119,3 +119,5 @@ pareto:
 output:
   html_path: "output/radar_map.html"
   report_path: "output/RADAR_REPORT.md"
+  dashboard_path: "output/index.html"
+  dashboard_template: "templates/dashboard.html"

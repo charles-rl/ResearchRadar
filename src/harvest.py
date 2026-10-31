@@ -41,6 +41,9 @@ LOGGER = logging.getLogger("research_radar.harvest")
 DEFAULT_CONFIG = Path("config.yaml")
 
 # LaTeX environments that carry display math.
+#: LaTeX display-math environments stripped by ``clean_academic_text``.
+#: ``multline`` is spelled correctly: it is amsmath's multi-line environment
+#: (there is no ``multiline`` environment), so it must not be "corrected".
 MATH_ENVIRONMENTS = (
     "equation",
     "align",
@@ -256,7 +259,8 @@ def paged_results(
                 limit,
             )
             return
-        except Exception as exc:  # HTTP errors, parse errors, timeouts, ...
+        except Exception as exc:  # noqa: BLE001 - the arXiv client raises
+            # arbitrary HTTP/parse/timeout errors and every one is retryable.
             attempts += 1
             if attempts > num_retries:
                 LOGGER.error(
