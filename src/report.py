@@ -29,6 +29,7 @@ import argparse
 import html as html_module
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -41,21 +42,17 @@ from .common import (
     LOGGER,
     Paths,
     configure_logging,
+    corpus_regime_labels,
     is_seed_paper,
     load_config,
     paper_source_url,
+    regime_palette,
     resolve_paths,
 )
 from .embed import Representation, load_representation
 
 DEFAULT_CONFIG = Path("config.yaml")
 PROMPT_TEMPLATE = Path("docs/kmo_prompt_template_A1.txt")
-
-REGIME_COLOURS = {
-    "SysID": "#1f77b4",
-    "Sim2Real": "#2ca02c",
-    "RL": "#d62728",
-}
 
 # Hand-curated prose filter. These are words that carry no topical information in
 # an abstract; without it the L1 concentration lens surfaces generic academic
@@ -683,7 +680,11 @@ def build_figure(
             )
         )
     heatmap_count = len(traces)
-    for label in ("SysID", "Sim2Real", "RL"):
+    # One scatter trace per regime, coloured by position so a taxonomy change in
+    # config.yaml never needs a code edit here.
+    regime_labels = corpus_regime_labels(papers)
+    colours = regime_palette(regime_labels)
+    for label in regime_labels:
         rows = [
             position
             for position, paper in enumerate(papers)
@@ -712,7 +713,7 @@ def build_figure(
                 name=label,
                 marker={
                     "size": 9,
-                    "color": REGIME_COLOURS.get(label, "#7f7f7f"),
+                    "color": colours[label],
                     "line": {"width": 0.6, "color": "white"},
                     "opacity": 0.85,
                 },
@@ -1485,18 +1486,21 @@ def render_markdown(
         "not proof that the topics are unexplored in the wider literature."
     )
     lines.append(
-        "- Abstracts, not full text, feed the vocabulary and the embeddings. The paper "
-        "uses full-text character n-grams, so its exact term statistics are not "
-        "reproducible at this scale."
+        "- The vocabulary and the term statistics come from **full text** extracted "
+        "from each paper's PDF, not from abstracts. Section boundaries are recovered "
+        "by heading detection, so a paper whose headings the PDF text layer mangles "
+        "contributes a slightly different term distribution than its author intended."
+    )
+    lines.append(
+        "- The corpus is founded on 15 user-curated seeding papers plus "
+        "35 harvested candidates per regime. The sim-to-real query returns only "
+        "~140 candidates corpus-wide, so that regime's 35 harvested slots are the "
+        "top 35 by relevance and have no headroom beyond review rejection."
     )
     lines.append(
         "- The reliability diagnostic `R` is reported but, per Sec. 4.3, is deliberately "
         "**not** a Pareto objective: maximizing low uncertainty favours already-dense "
         "regions."
-    )
-    lines.append(
-        "- The sim-to-real query returns only ~140 candidates corpus-wide, so its 40 "
-        "papers are the top 40 by relevance with no headroom beyond review rejection."
     )
     lines.append("")
     return "\n".join(lines)
@@ -1688,10 +1692,31 @@ def write_outputs(
 # --------------------------------------------------------------------------- #
 # Verification
 # --------------------------------------------------------------------------- #
+def _corpus_regime_labels(paths: Paths) -> list[str]:
+    """Regime labels of the current corpus, in regime-id order."""
+    if not paths.corpus.is_file():
+        return []
+    try:
+        with paths.corpus.open("r", encoding="utf-8") as handle:
+            corpus = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        LOGGER.warning("Cannot read regime labels from %s: %s", paths.corpus, exc)
+        return []
+    return corpus_regime_labels(corpus.get("papers", []))
+
+
 def verify_outputs(
-    paths: Paths, template_path: Path, min_html_bytes: int = 50_000
+    paths: Paths,
+    template_path: Path,
+    min_html_bytes: int = 50_000,
+    regime_labels: Sequence[str] | None = None,
 ) -> bool:
-    """Check that both artifacts exist, are populated, and stay truthful."""
+    """Check that both artifacts exist, are populated, and stay truthful.
+
+    ``regime_labels`` are read back from the corpus rather than hardcoded: the
+    taxonomy lives in ``config.yaml``, so a check on a label the current corpus
+    does not contain would fail every rebuild after a taxonomy change.
+    """
     ok = True
     if not paths.html.is_file():
         LOGGER.error("Missing %s", paths.html)
@@ -1705,7 +1730,8 @@ def verify_outputs(
         LOGGER.error("HTML looks empty: %d bytes", html_size)
         ok = False
     html_text = paths.html.read_text(encoding="utf-8", errors="replace")
-    for needle in ("Plotly.newPlot", "Practical Pareto gaps", "SysID", "Sim2Real"):
+    needles = ["Plotly.newPlot", "Practical Pareto gaps", *(regime_labels or ())]
+    for needle in needles:
         if needle not in html_text:
             LOGGER.error("HTML is missing expected content: %r", needle)
             ok = False
@@ -1852,7 +1878,13 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if args.verify_only:
-        return 0 if verify_outputs(paths, template_path) else 1
+        return (
+            0
+            if verify_outputs(
+                paths, template_path, regime_labels=_corpus_regime_labels(paths)
+            )
+            else 1
+        )
 
     for required, producer in (
         (paths.corpus, "src.harvest"),
@@ -1871,7 +1903,13 @@ def main(argv: list[str] | None = None) -> int:
         summary["vocabulary_terms"],
         summary["prompt_chars"],
     )
-    return 0 if verify_outputs(paths, template_path) else 1
+    return (
+        0
+        if verify_outputs(
+            paths, template_path, regime_labels=_corpus_regime_labels(paths)
+        )
+        else 1
+    )
 
 
 if __name__ == "__main__":

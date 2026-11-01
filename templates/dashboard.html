@@ -545,9 +545,7 @@
       <div id="layer-note"></div>
 
       <div class="map-legend">
-        <span class="legend-item"><span class="chip-dot" style="background:#22d3ee"></span>SysID</span>
-        <span class="legend-item"><span class="chip-dot" style="background:#fbbf24"></span>Sim2Real</span>
-        <span class="legend-item"><span class="chip-dot" style="background:#34d399"></span>RL</span>
+        <span id="regime-legend"></span>
         <span class="legend-sep"></span>
         <span class="legend-item"><span class="diamond-glyph"></span>seeding paper</span>
         <span class="legend-item"><span class="star-glyph" style="color:#f9a8d4">★</span>practical gap</span>
@@ -634,7 +632,7 @@
 
         <div class="lens-block">
           <div class="lens-head">
-            <span class="chip-dot" style="background:#22d3ee"></span>
+            <span class="chip-dot" style="background:#94a3b8"></span>
             <span class="lbl">L2 theme lens</span>
             <span class="hint">high local mass</span>
           </div>
@@ -643,7 +641,7 @@
 
         <div class="lens-block">
           <div class="lens-head">
-            <span class="chip-dot" style="background:#34d399"></span>
+            <span class="chip-dot" style="background:#cbd5e1"></span>
             <span class="lbl">Emergent shared topics</span>
             <span class="badge emergent">df ≥ 4</span>
           </div>
@@ -652,7 +650,7 @@
 
         <div class="lens-block">
           <div class="lens-head">
-            <span class="chip-dot" style="background:#f472b6"></span>
+            <span class="chip-dot" style="background:#64748b"></span>
             <span class="lbl">Limited-source hypotheses</span>
             <span class="badge limited">df ≤ 3</span>
           </div>
@@ -711,6 +709,17 @@ const DATA = readPayload();
 const REGIME_COLOR = {};
 DATA.regimes.forEach(function (regime) { REGIME_COLOR[regime.label] = regime.color; });
 
+/* The regime legend is built from the payload, never from the markup: the
+   taxonomy lives in config.yaml, so chips baked into this template would go
+   stale the moment a regime is renamed, added or dropped. */
+DATA.regimes.forEach(function (regime) {
+  const legendHost = document.getElementById("regime-legend");
+  if (!legendHost) return;
+  append(legendHost, el("span", { class: "legend-item" }, [
+    el("span", { class: "chip-dot", style: { background: regime.color } }),
+    el("span", { text: regime.label })
+  ]));
+});
 const ARC_COLOR = {
   "Archetype A": "#22d3ee",
   "Archetype B": "#fbbf24",

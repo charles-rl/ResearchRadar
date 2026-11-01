@@ -22,11 +22,13 @@ checks whatever an LLM returns for that prompt).
 
 | ID | Label | Query |
 | --- | --- | --- |
-| 0 | Classical System Identification | `abs:"system identification" AND (cat:cs.RO OR cat:eess.SY)` |
-| 1 | Sim2Real / Domain Randomization | `abs:"domain randomization" AND abs:"sim-to-real" AND cat:cs.RO` |
-| 2 | Deep RL Control | `abs:"reinforcement learning" AND abs:"manipulation" AND cat:cs.RO` |
+| 0 | Zero-Shot RL & Predictive Representations | `(abs:"zero-shot" OR abs:"forward-backward" OR abs:"latent dynamics" OR abs:"successor feature") AND abs:"reinforcement learning" AND (cat:cs.RO OR cat:cs.LG)` |
+| 1 | Sim-to-Real & Hardware Physics Adaptation | `(abs:"sim-to-real" OR abs:"domain randomization") AND (abs:"friction" OR abs:"actuator" OR abs:"legged" OR abs:"system identification") AND cat:cs.RO` |
+| 2 | Dynamic Legged Control & Trajectory Optimization | `(abs:"bipedal" OR abs:"legged" OR abs:"cassie") AND (abs:"feedback control" OR abs:"walking" OR abs:"cma-es" OR abs:"virtual constraints") AND (cat:cs.RO OR cat:eess.SY)` |
 
 35 harvested papers per regime, plus the 15 seeding papers, 120 documents total.
+The regimes are defined entirely by `config.yaml`; nothing downstream assumes the
+labels above, so a taxonomy change is a config edit plus a re-harvest.
 
 ## Seeding papers (Seed-First Expansion)
 
@@ -38,13 +40,16 @@ whatever their year.
 Three things follow from the seeds:
 
 1. **The recency window scales with them.** Harvest starts at
-   `min(seed_year) - 2`, floored to a 10-year lookback, so adding an older seed
-   widens the window instead of leaving a temporal gap between the seeds and the
-   harvested literature.
+   `min(seed_year) - 2`, clamped so it never reaches further back than
+   `corpus.lookback_years` (12), so adding an older seed widens the window
+   instead of leaving a temporal gap between the seeds and the harvested
+   literature, while one very old seed cannot drag the corpus back a decade.
 2. **The harvest cannot duplicate them.** Seed arXiv ids are pre-registered as
-   seen, so a seed that is itself on arXiv is never harvested twice. A seed whose
-   PDF has a free-form filename (`TD JEPA.pdf`) is resolved to its arXiv record
-   by exact title match, which supplies its year and a working link.
+   seen with the version suffix stripped, so a seed named `2511.04131.pdf`
+   still blocks `2511.04131v2` from the API, and seed titles are pre-registered
+   too. A seed whose PDF has a free-form filename (`TD JEPA.pdf`) is resolved to
+   its arXiv record by exact title match, which supplies its year and a working
+   link.
 3. **A rebuild starts clean.** The corpus is exactly this run's seeds plus this
    run's harvest. Nothing is inherited from an earlier corpus.
 
@@ -194,7 +199,7 @@ from `models/F2LLM-*` with the recipe above only if you need to re-register.
 
 * **Projection.** Classical MDS, then constrained stress minimization with 9
   gauge-fixing anchors (8 perimeter + 1 central) onto `[-1, 1]^2`.
-  Final metric stress 204.69, Spearman(distance) 0.8658.
+  Final metric stress 578.95, Spearman(distance) 0.7053.
 * **Grid.** 21x21 = 441 candidates, scored on `P_boundary`, `W`, `G`, and `S`.
 * **Three boundary views.** `B_k5_global`, `B_k8_global`, `B_k8_adaptive`
   combined by harmonic mean (Eq. 21), not a single `B`. K=5 is the Discovery
@@ -207,9 +212,11 @@ from `models/F2LLM-*` with the recipe above only if you need to re-register.
   `v(x) = normalize(Σ wᵢ zᵢ)` taken by **discrete central differences**, because
   `v` is nonlinear and the analytic first-order projection disagrees with the
   discrete difference by a factor of four.
-* **Pareto search.** Exact pairwise dominance, no evolutionary optimizer. 61
-  non-dominated points, 50 practical after the `W(x) > 0` filter, grouped into
-  2 discovery archetypes at `archetype_radius: 0.35`.
+* **Pareto search.** Exact pairwise dominance, no evolutionary optimizer. 65
+  non-dominated points, 60 practical after the `W(x) > 0` filter, grouped into
+  17 discovery archetypes at `archetype_radius: 0.35`. The best compromise is
+  `#1` at `(+0.20, -0.80)` with `P_boundary=0.963`, `W=1.000`, `G=0.789`,
+  `S=0.517`, `d_ideal=0.5283`.
 * **Table 4 baseline.** The 16 largest-`d_nn` grid points, over the whole grid
   and over the interior only, are scored alongside the front. Every
   unconstrained pick lands on the chart edge with support near zero, which is
@@ -235,10 +242,12 @@ payload, so it opens straight from the filesystem with no server and no build
 step. Plotly and Lucide load from CDNs (pinned, with SRI hashes); all styling is
 plain CSS inlined in the page, so there is no CSS framework in the load path.
 
-* **Left panel** — the manifold on `[-1, 1]^2`, papers coloured by regime, the 33
+* **Left panel** — the manifold on `[-1, 1]^2`, papers coloured by regime, the 60
   practical gaps as stars, and layer buttons (keys `1`-`5`) that swap the
   background between `P_boundary`, `W`, `G`, and `S`. The axes are pinned 1:1, so
-  the plot stays square and letterboxes inside a wide pane.
+  the plot stays square and letterboxes inside a wide pane. The regime legend is
+  generated from the payload, so it cannot drift from `config.yaml`, and the gap
+  stars use one neutral intensity ramp rather than the regime hues.
 * **Right panel** — the selected gap's evidence package: a 4-axis objective
   radar, support statistics, the regime mixture, the top-5 anchor papers, the
   L2/L1 lexical split, and the Appendix A.1 prompt with a copy button.
@@ -311,6 +320,7 @@ for a human instead of returning a verdict.
 
 ```text
 config.yaml                       queries, limits, model/analysis parameters
+docs/AGENT_RUNBOOK.md             operating checklist: run order, changing seeds/regimes
 docs/implementation-notes.md      non-obvious environment traps and decisions
 docs/kmo_prompt_template_A1.txt   Appendix A.1 template (one documented edit)
 docs/kmo_prompt_template_A1.original.txt   pristine extract from the paper
@@ -329,6 +339,7 @@ tests/test_manifold.py            the equations that invite silent drift
 tests/test_audit.py               the eight Appendix A.2 checks
 tests/test_pareto.py              dominance orientation, archetype grouping
 tests/test_seed_first.py          seed years, harvest window, front matter
+                                  and version-insensitive seed deduplication
 tests/dashboard_smoke.js          offline DOM-shim test of the dashboard script
 docs/papers/desired/              the seeding PDFs (git-ignored; you supply these)
 data/corpus.json                  the 120-document corpus (committed)

@@ -55,13 +55,27 @@ from .report import (
 DEFAULT_CONFIG = Path("config.yaml")
 PLACEHOLDER = "__RADAR_DATA__"
 
-#: Regime palette. Cyan / amber / emerald keeps the three groups distinguishable
-#: against a dark slate field and matches the Markdown report's ordering.
-REGIME_COLOURS = {
-    "SysID": "#22d3ee",
-    "Sim2Real": "#fbbf24",
-    "RL": "#34d399",
-}
+#: Regime colours are assigned by position from the shared palette so the
+#: taxonomy stays a config concern. The dashboard renders on a dark slate field,
+#: and these hues keep adjacent regimes distinguishable against it.
+DASHBOARD_PALETTE = (
+    "#22d3ee",
+    "#fbbf24",
+    "#34d399",
+    "#a78bfa",
+    "#fb7185",
+    "#f97316",
+    "#38bdf8",
+    "#e879f9",
+)
+
+
+def dashboard_palette(labels: list[str]) -> dict[str, str]:
+    """Map each regime label to a dashboard colour, wrapping if needed."""
+    return {
+        label: DASHBOARD_PALETTE[position % len(DASHBOARD_PALETTE)]
+        for position, label in enumerate(labels)
+    }
 
 #: Plotly reads ``z[i][j]`` at ``(y=axis[i], x=axis[j])``, so the field matrix is
 #: transposed by ``objective_field`` before it reaches the browser.
@@ -248,6 +262,10 @@ def build_payload(
     )
 
     regimes = []
+    colours = dashboard_palette([
+        str(regime.get("label", f"Regime {regime['id']}"))
+        for regime in config.get("regimes", [])
+    ])
     for regime in config.get("regimes", []):
         label = str(regime.get("label", f"Regime {regime['id']}"))
         regimes.append(
@@ -255,17 +273,18 @@ def build_payload(
                 "id": int(regime["id"]),
                 "label": label,
                 "name": str(regime.get("name", label)),
-                "color": REGIME_COLOURS.get(label, "#94a3b8"),
+                "color": colours.get(label, "#94a3b8"),
             }
         )
     if not regimes:
         labels = sorted({str(paper["regime_label"]) for paper in corpus["papers"]})
+        colours = dashboard_palette(labels)
         regimes = [
             {
                 "id": position,
                 "label": label,
                 "name": label,
-                "color": REGIME_COLOURS.get(label, "#94a3b8"),
+                "color": colours.get(label, "#94a3b8"),
             }
             for position, label in enumerate(labels)
         ]
@@ -587,9 +606,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.verify_only:
         return 0 if verify_dashboard(paths) else 1
 
+    # ``paths.embeddings`` is deliberately absent: the representation is the
+    # character n-gram TF-IDF matrix from ``src.embed``, and the dashboard never
+    # reads a dense embedding file.  Requiring one made the dashboard unbuildable
+    # by naming a stale artifact no command in the pipeline produces.
     for required, producer in (
         (paths.corpus, "src.harvest"),
-        (paths.embeddings, "src.embed"),
         (paths.grid_npz, "src.manifold"),
         (paths.pareto_json, "src.pareto"),
     ):

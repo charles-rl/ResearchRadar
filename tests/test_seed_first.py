@@ -14,9 +14,11 @@ import pytest
 from src.harvest import (
     QualityGate,
     _seed_filename_slug,
+    arxiv_base_id,
     date_clause,
     harvest_start_year,
     infer_seed_year,
+    normalize_title,
     normalize_title_key,
     parse_seed_metadata,
     seed_abstract,
@@ -251,3 +253,44 @@ def test_lookback_floor_wins_over_a_centuries_old_seed() -> None:
 
 def test_current_year_hook_keeps_the_suite_time_independent() -> None:
     assert harvest_start_year([2020], _config(), current_year=2026) == 2018
+
+
+# --------------------------------------------------------------------------- #
+# Seed/version id matching
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    ("given", "expected"),
+    [
+        ("2511.04131", "2511.04131"),
+        ("2511.04131v2", "2511.04131"),
+        ("2103.07945v3", "2103.07945"),
+        ("hep-th/9901001v2", "hep-th/9901001"),
+        ("", ""),
+    ],
+)
+def test_arxiv_base_id_strips_only_the_version(given: str, expected: str) -> None:
+    assert arxiv_base_id(given) == expected
+
+
+def test_unversioned_seed_matches_its_versioned_harvest() -> None:
+    """A seed named ``2511.04131.pdf`` must block ``2511.04131v2`` from the API.
+
+    The PDF filename usually carries no version while the API always reports
+    one, so comparing raw strings let the seed back in as a harvested paper and
+    the corpus verify reported a duplicate title inside a single regime.
+    """
+    seen = {arxiv_base_id("2511.04131")}
+    assert arxiv_base_id("2511.04131v2") in seen
+
+
+def test_hyphen_wrapped_seed_title_matches_the_api_title() -> None:
+    """PDF front matter hyphenates at line breaks; the dedupe key must not care."""
+    from_pdf = (
+        "BFM-ZERO: A PROMPTABLE BEHAVIORAL FOUNDA- TION MODEL FOR HUMANOID "
+        "CONTROL USING UN- SUPERVISED REINFORCEMENT LEARNING"
+    )
+    from_api = (
+        "BFM-Zero: A Promptable Behavioral Foundation Model for Humanoid "
+        "Control Using Unsupervised Reinforcement Learning"
+    )
+    assert normalize_title(from_pdf) == normalize_title(from_api)

@@ -181,17 +181,28 @@ if (!main) {
   const names = traces.map((t) => t.name);
   pass("manifold traces: " + traces.length + " -> " + names.filter(Boolean).join(", "));
 
-  /* Harvested papers sit in the three regime traces; the 15 seeding papers are
-     a fourth trace with a hollow-diamond marker so their positions read
-     separately against the gaps.  Together they must account for every paper. */
-  const papers = traces.filter((t) => t.type === "scatter" && ["SysID", "Sim2Real", "RL"].includes(t.name));
+  /* Harvested papers sit one trace per regime (the taxonomy is data-driven, so
+     the names come from DATA.regimes rather than a hardcoded list); the 15
+     seeding papers are a separate trace with a hollow-diamond marker so their
+     positions read separately against the gaps.  Together they must account for
+     every paper. */
+  const regimeTraceNames = DATA.regimes.map((r) => r.label);
+  const papers = traces.filter((t) => t.type === "scatter" && regimeTraceNames.includes(t.name));
   const seeds = traces.filter((t) => t.type === "scatter" && t.name === "Seeding papers");
   const totalPapers = papers.reduce((s, t) => s + t.x.length, 0) +
     seeds.reduce((s, t) => s + t.x.length, 0);
   if (totalPapers !== 120) fail("paper traces cover " + totalPapers + " papers, expected 120");
-  else pass("3 regime traces + seed trace cover all 120 papers (" +
+  else pass(regimeTraceNames.length + " regime traces + seed trace cover all 120 papers (" +
     papers.map((t) => t.name + ":" + t.x.length).join(" ") + " seeds:" +
     seeds.reduce((s, t) => s + t.x.length, 0) + ")");
+
+  /* The regime legend must be generated from the payload, so it cannot drift
+     from config.yaml the way hardcoded markup would. */
+  const legendItems = (documentStub.getElementById("regime-legend") || { children: [] }).children;
+  if (legendItems.length !== DATA.regimes.length)
+    fail("regime legend has " + legendItems.length + " items, payload has " + DATA.regimes.length);
+  else pass("regime legend rendered from the payload: " +
+    DATA.regimes.map((r) => r.label).join(", "));
 
   if (seeds.length !== 1) fail("expected one seeding-paper trace, found " + seeds.length);
   else if (seeds[0].marker.symbol !== "diamond-open")
@@ -202,8 +213,7 @@ if (!main) {
     fail("seed trace has " + seeds[0].x.length + " points, payload has " + seededPapers.length);
   else pass("seed trace matches the payload's " + seededPapers.length + " seeding papers");
 
-  const gaps = traces.find((t) => t.name === "Supported Knowledge Gaps");
-  if (!gaps) fail("no 'Supported Knowledge Gaps' trace");
+  const gaps = traces.find((t) => t.name === "Supported Knowledge Gaps");  if (!gaps) fail("no 'Supported Knowledge Gaps' trace");
   else if (gaps.x.length !== DATA.gaps.length)
     fail("gap trace has " + gaps.x.length + " points, payload has " + DATA.gaps.length);
   else pass(DATA.gaps.length + " clickable gap markers");

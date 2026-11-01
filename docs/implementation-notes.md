@@ -315,6 +315,17 @@ reading the template.
 - **Stars outranked the data they came from.** 33 gap stars at `size: 27` with a
   `0.16`-opacity halo buried the 120 paper dots. Markers are now 11.5 with a
   `size: 15, opacity: 0.10` halo, so the corpus stays the dominant texture.
+- **The regime legend was markup, not data.** Three chips were baked into
+  `templates/dashboard.html` with hardcoded cyan/amber/emerald dots and the
+  labels `SysID`, `Sim2Real`, `RL`, and `src/report.py` verified that two of
+  those strings appeared in the rendered HTML. A taxonomy change in
+  `config.yaml` therefore produced a page whose legend named regimes the corpus
+  no longer contained, and `--verify-only` failed on a label rather than on a
+  defect. Colours now come from `common.regime_palette` by position, the legend
+  is rendered from the payload, and the check reads the labels back out of
+  `corpus.json`. The lexical-lens dots moved to neutral greys for the same
+  reason the field ramp is neutral: regime hue is the only categorical colour on
+  the map.
 - **Vertex text collided with the theta labels.** `textposition: "middle right"`
   on the 4-axis radar put `0.98` on the `P` label and the pair rendered as
   `0P98`. Values moved to a caption row under the chart, which also freed the
@@ -341,7 +352,8 @@ reading the template.
   denominator on two-column PDFs.
 - **`min(seed_years)` needs a floor and a ceiling.** The window
   `min(seed_year) - 2` alone lets one old seed drag the harvest back a decade,
-  leaving the corpus temporally split. It is clamped to a 10-year lookback, and a
+  leaving the corpus temporally split. It is clamped to a `corpus.lookback_years`
+  lookback (12), and a
   seed whose year cannot be recovered is excluded from `min()` rather than
   treated as year 0.
 - **A seed's own arXiv id must be pre-registered as seen.** Otherwise a seed that
@@ -383,6 +395,37 @@ reading the template.
   seed-aware edits that had been made in the same session, because nothing had
   been committed yet. Commit a stage before attempting repair surgery on it.
 
+## The full-text cache stores raw extraction, not sanitised text
+
+The cache under `data/fulltext_cache/` holds `<id>.raw.txt`, the text exactly as
+`mutool` (or the ar5iv fallback) produced it. Sanitation is applied on read, once
+per build, so the cache can always be re-sanitised under changed rules. Caching
+the sanitised text instead made the cache an unfixable record of whichever rules
+were in force when it was written, and because `extract_corpus_fulltext` re-ran
+sanitation over its own output on every rebuild, a non-idempotent stage eroded
+the corpus a little further each time. That erosion moved the Pareto front while
+leaving the 120-paper list identical, which is the least diagnosable symptom
+available.
+
+Two stages were genuinely non-idempotent, both because a later stage undid the
+work of an earlier one:
+
+1. The citation stripper treated a bracket as a citation only by looking ahead
+   for `\[`. A table-header row such as `Parameters Range Unit [0.5, 2.5] % Mass`
+   therefore read as "surname + citation". Deleting a word re-exposed the word
+   before it, so each pass ate one more header word: `Unit`, then `Range`, then
+   `Parameters`. The learner and its bracket are now a single match, and the
+   bracket must be a genuine numeric citation.
+2. `normalize_extracted_text` runs *after* the stripper and rejoins end-of-line
+   hyphenation, so a name split as `Bom-\nbois` became visible only on the second
+   pass. Character repair now happens before sanitation as well, and the
+   space-before-punctuation tidy moved into the normaliser so collapsing newlines
+   cannot re-open a gap.
+
+`S(S(x)) == S(x)` is pinned over representative shapes in
+`tests/test_sanitize.py`, and `corpus.json` carries a `text_fingerprint` so a
+text-level drift is visible without diffing 4.5 MB of full text.
+
 ## Offline verification
 
 All stages verify without network access and exit non-zero on failure:
@@ -420,9 +463,10 @@ behaviour is pinned by `tests/test_audit.py` instead, which drives all eight
 checks through both directions — a compliant answer passes all eight, and each
 violation is caught by the item that owns it.
 
-`pytest` runs 220 tests and covers what is expensive to get wrong and cheap to
-check: 68 sanitiser cases, 31 Seed-First cases (year inference, the harvest
-window floor and ceiling, title keys, front-matter parsing), 26 for the n-gram
+`pytest` runs 240 tests and covers what is expensive to get wrong and cheap to
+check: 81 sanitiser cases, 38 Seed-First cases (year inference, the harvest
+window floor and ceiling, title keys, front-matter parsing, and
+version-insensitive seed deduplication), 26 for the n-gram
 matrix and whole-word index, 44 for the eight Appendix A.2 checks, 35 for the
 manifold, and 16 for Pareto dominance and archetype grouping. Two of those groups
 exist because the bug they catch produced a plausible number rather than an

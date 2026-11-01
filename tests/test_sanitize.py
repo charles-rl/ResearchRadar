@@ -426,3 +426,104 @@ def test_quality_gate_config_round_trip() -> None:
 def test_quality_gate_rejects_non_numeric_config() -> None:
     with pytest.raises(SystemExit):
         QualityGate.from_config({"min_words": "one thousand"})
+
+
+# --------------------------------------------------------------------------- #
+# Idempotency
+#
+# The sanitizer runs again over already-sanitized text whenever the full-text
+# cache is reused, and the result is written back.  A non-idempotent stage
+# therefore erodes the corpus a little further on every rebuild: text shrinks,
+# the K=8 partition re-cuts, and the Pareto front moves even though the papers
+# did not.  Each case below is a shape that once lost a word per pass.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    "text",
+    [
+        # A table header row: "Unit" was eaten, then "Range", then "Parameters".
+        "Parameters Range Unit [0.5, 2.5] % Mass [-0.25, 0.25] % Center of mass",
+        "LE II: Noise/delay parameters Parameter Range [-0.002, 0.002] all obs",
+        # Genuine callouts must still go, and must not cascade either.
+        "see Smith et al. [12] for details",
+        "as shown in Jones [3, 4] and Chen [5-9]",
+        "Wu (2019) and Algorithm (2020) agree",
+        # Intervals that are not citations at all.
+        "values lie in [0.5, 2.5] over the domain",
+        "x in [0, 1] and Over [1, 2] the field is smooth",
+        ("Plain body prose with no citation-shaped tokens at all. " * 40).strip(),
+    ],
+)
+def test_citation_stripping_is_idempotent(text: str) -> None:
+    once = strip_citation_callouts(text)[0]
+    twice = strip_citation_callouts(once)[0]
+    assert twice == once, f"second pass changed the text: {once!r} -> {twice!r}"
+
+
+def test_full_sanitation_is_idempotent() -> None:
+    """The whole chain, not just the callout stripper, must reach a fixed point.
+
+    This is the property the cache depends on.  ``sanitize_document_text`` is
+    applied to cached text on a cache hit, so ``S(S(x)) == S(x)`` is what makes a
+    rebuild reproduce the committed corpus.
+    """
+    raw = (
+        "A Survey of Things That Nobody Reads\n"
+        "Jane Q. Author and John R. Author\n"
+        "Department of Robotics, Some University\n"
+        "\n"
+        "Abstract\n"
+        "We study things [1] and more things [2, 3]. Parameters Range Unit "
+        "[0.5, 2.5] and sensitivity over [0, 1]. Smith et al. [4] agree.\n"
+        "\n"
+        "1. Introduction\n"
+        f"{FILLER}\n"
+        "\n"
+        "Acknowledgments\n"
+        "We thank the reviewers.\n"
+        "\n"
+        "References\n"
+        f"{REFERENCE_LIST}\n"
+    )
+    once = sanitize_document_text(raw, 0).text
+    twice = sanitize_document_text(once, 0).text
+    assert twice == once
+
+
+def test_citation_stripping_does_not_eat_table_headers() -> None:
+    """A decimal interval is not a citation, so nothing before it is a surname."""
+    text = "Parameters Range Unit [0.5, 2.5] % Mass"
+    cleaned, _ = strip_citation_callouts(text)
+    assert cleaned == text
+
+
+def test_surname_is_removed_together_with_its_citation() -> None:
+    """One match, so a second pass cannot treat the exposed word as a surname."""
+    cleaned, removed = strip_citation_callouts("see Smith et al. [12] for details")
+    assert "Smith" not in cleaned
+    assert "[12]" not in cleaned
+    assert removed == 1
+    assert strip_citation_callouts(cleaned)[0] == cleaned
+
+
+def test_hyphen_wrap_cannot_hide_a_citation() -> None:
+    """``Bom-\\nbois`` hides a parenthetical citation from the callout stripper.
+
+    Sanitation runs before newlines are collapsed, so a name broken across a line
+    break presents as ``Bom-`` and the citation patterns do not see it.  Repairing
+    the wrap first is what makes the removal happen on the first pass instead of
+    the second, which is the difference between one stable corpus and a corpus that
+    shrinks every rebuild.
+    """
+    raw = "closed-loop systems in (Bom-\nbois et al., 2006). The criterion follows."
+    once = sanitize_document_text(raw * 40, 100).text
+    assert "Bombois" not in once
+    assert "2006" not in once
+    assert sanitize_document_text(once, 100).text == once
+
+
+def test_space_before_punctuation_does_not_survive_normalization() -> None:
+    """Collapsing newlines happens after callout removal, so it can re-open a gap."""
+    raw = "the estimator (L1-LMS)\n, and the penalty follows. " * 40
+    once = sanitize_document_text(raw, 100).text
+    assert " ," not in once
+    assert sanitize_document_text(once, 100).text == once

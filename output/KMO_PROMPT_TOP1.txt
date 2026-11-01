@@ -1,7 +1,7 @@
 You are participating in a controlled experiment.  A deterministic 
 pipeline has analyzed a corpus of papers and exported a machine-computed 
 **evidence package** for one location on its knowledge map — the attached 
-`evidence_point_+0.40_-0.80.json`, as produced by `code/make_evidence.py`. 
+`evidence_point_+0.20_-0.80.json`, as produced by `code/make_evidence.py`. 
 No real paper occupies that location.  Your task is to write the 
 **virtual document**: a description of the research that *would* occupy 
 it. 
@@ -56,76 +56,84 @@ Deliverables
 Output Task A, then Task B, then the `Evidence used:` list.  Do not 
 include anything else — no reasoning trace, no extra sections. 
 
---- attached: evidence_point_+0.40_-0.80.json ---
+--- attached: evidence_point_+0.20_-0.80.json ---
 {
   "location": {
-    "x": 0.4,
+    "x": 0.2,
     "y": -0.8
   },
   "theme_lens_L2": [
     {
       "term": "representation",
-      "weight": 0.46528,
-      "df": 107,
+      "weight": 0.52035,
+      "df": 113,
       "word_forms": [
         "represent",
         "representation",
         "representational",
         "representations",
         "represented",
-        "representer",
         "representing",
         "represents"
       ]
     },
     {
-      "term": "information-theoretic",
-      "weight": 0.41943,
+      "term": "representation-learning",
+      "weight": 0.47208,
       "df": 4,
       "word_forms": [
-        "information-theoretic",
-        "information-theoretical",
-        "information-theoretically"
+        "representation-learning"
       ]
     },
     {
-      "term": "parameterized",
-      "weight": 0.40735,
-      "df": 40,
+      "term": "state-representation",
+      "weight": 0.41876,
+      "df": 2,
       "word_forms": [
-        "parameterizations",
-        "parameterize",
-        "parameterized",
-        "parameterizes"
+        "state-representation",
+        "state-representations"
       ]
     },
     {
       "term": "optimization",
-      "weight": 0.40088,
-      "df": 110,
+      "weight": 0.38903,
+      "df": 111,
       "word_forms": [
         "optimal",
         "optimally",
-        "optimisation",
         "optimising",
         "optimization",
         "optimizing"
       ]
     },
     {
-      "term": "parameterization",
-      "weight": 0.36093,
-      "df": 14,
+      "term": "computationally-efficient",
+      "weight": 0.37297,
+      "df": 2,
       "word_forms": [
-        "parameterisation",
-        "parameterization",
-        "parameterizing"
+        "computationally-efficient"
+      ]
+    },
+    {
+      "term": "computed",
+      "weight": 0.34448,
+      "df": 101,
+      "word_forms": [
+        "computation",
+        "computational",
+        "computations",
+        "compute",
+        "computed",
+        "computer",
+        "computers",
+        "computes",
+        "computing"
       ]
     },
     {
       "term": "optimized",
-      "weight": 0.35007,
-      "df": 77,
+      "weight": 0.34304,
+      "df": 83,
       "word_forms": [
         "optimizations",
         "optimize",
@@ -136,38 +144,43 @@ include anything else — no reasoning trace, no extra sections.
       ]
     },
     {
-      "term": "reparameterization",
-      "weight": 0.34377,
+      "term": "parameterized",
+      "weight": 0.33426,
+      "df": 59,
+      "word_forms": [
+        "parameterizations",
+        "parameterize",
+        "parameterized",
+        "parameterizes"
+      ]
+    },
+    {
+      "term": "fb-representation",
+      "weight": 0.33109,
       "df": 2,
       "word_forms": [
-        "reparameterization"
+        "fb-representation"
       ]
     },
     {
-      "term": "distribution",
-      "weight": 0.34012,
-      "df": 90,
+      "term": "transformer",
+      "weight": 0.32941,
+      "df": 42,
       "word_forms": [
-        "distribution",
-        "distributional",
-        "distributions"
-      ]
-    },
-    {
-      "term": "generalization",
-      "weight": 0.33904,
-      "df": 69,
-      "word_forms": [
-        "generalisation",
-        "generality",
-        "generalization",
-        "generalizing"
+        "transform",
+        "transformation",
+        "transformations",
+        "transformed",
+        "transformer",
+        "transformers",
+        "transforming",
+        "transforms"
       ]
     },
     {
       "term": "generalize",
-      "weight": 0.33856,
-      "df": 64,
+      "weight": 0.32401,
+      "df": 78,
       "word_forms": [
         "generalizations",
         "generalize",
@@ -176,36 +189,46 @@ include anything else — no reasoning trace, no extra sections.
       ]
     },
     {
-      "term": "reparametrized",
-      "weight": 0.33841,
-      "df": 3,
+      "term": "generalization",
+      "weight": 0.32282,
+      "df": 64,
       "word_forms": [
-        "reparametrizations",
-        "reparametrized"
-      ]
-    },
-    {
-      "term": "expectation-maximization",
-      "weight": 0.33623,
-      "df": 2,
-      "word_forms": [
-        "expectation-maximization"
+        "generalisation",
+        "generalising",
+        "generality",
+        "generalization",
+        "generalizing"
       ]
     }
   ],
   "concentration_lens_L1": [],
   "contributing_documents_top3": [
     {
-      "doc": "doc 31",
-      "source": "https://arxiv.org/abs/1612.09158v1",
+      "doc": "doc 89",
+      "source": "https://arxiv.org/abs/1807.08037v2",
       "is_seed": false,
-      "title": "The interplay between system identification and machine learning",
+      "title": "Bipedal Hopping: Reduced-order Model Embedding via Optimization-based Control",
       "authors": [
-        "Gianluigi Pillonetto"
+        "Xiaobin Xiong",
+        "Aaron Ames"
       ],
-      "year": 2016,
-      "regime": "SysID",
-      "weight": 0.123
+      "year": 2018,
+      "regime": "Legged-Control",
+      "weight": 0.1069
+    },
+    {
+      "doc": "doc 31",
+      "source": "https://arxiv.org/abs/2410.17904v1",
+      "is_seed": false,
+      "title": "Reinforcement Learning under Latent Dynamics: Toward Statistical and Algorithmic Modularity",
+      "authors": [
+        "Philip Amortila",
+        "Dylan J. Foster",
+        "Nan Jiang"
+      ],
+      "year": 2024,
+      "regime": "ZeroShot-Rep",
+      "weight": 0.098
     },
     {
       "doc": "doc 4",
@@ -218,24 +241,11 @@ include anything else — no reasoning trace, no extra sections.
         "Shinichi Shirakawa"
       ],
       "year": 2025,
-      "regime": "RL",
-      "weight": 0.1108
-    },
-    {
-      "doc": "doc 47",
-      "source": "https://arxiv.org/abs/2207.01062v2",
-      "is_seed": false,
-      "title": "Distributed Online System Identification for LTI Systems Using Reverse Experience Replay",
-      "authors": [
-        "Ting-Jui Chang",
-        "Shahin Shahrampour"
-      ],
-      "year": 2022,
-      "regime": "SysID",
-      "weight": 0.0871
+      "regime": "Legged-Control",
+      "weight": 0.0912
     }
   ],
-  "mixture_entropy_H": 0.7113,
-  "effective_contributing_documents": 15.5,
-  "relative_uncertainty_u": 0.0071
+  "mixture_entropy_H": 0.8265,
+  "effective_contributing_documents": 16.83,
+  "relative_uncertainty_u": 0.003379
 }

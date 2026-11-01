@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -130,3 +131,35 @@ def is_seed_paper(paper: dict[str, Any]) -> bool:
 def paper_provenance(paper: dict[str, Any]) -> str:
     """Short human label for where a paper came from."""
     return "seed" if is_seed_paper(paper) else "harvested"
+
+
+#: Categorical colours for regimes, assigned by position in the regime list.
+#: Nothing downstream may hardcode a regime label: the taxonomy lives in
+#: ``config.yaml`` and a taxonomy change must not require a code edit.
+REGIME_PALETTE = (
+    "#1f77b4",
+    "#2ca02c",
+    "#d62728",
+    "#9467bd",
+    "#ff7f0e",
+    "#17becf",
+    "#8c564b",
+    "#e377c2",
+)
+
+
+def corpus_regime_labels(papers: list[dict[str, Any]]) -> list[str]:
+    """Regime labels in ``regime_id`` order, as they appear in the corpus."""
+    ordered: dict[int, str] = {}
+    for paper in papers:
+        identifier = int(paper.get("regime_id", 0))
+        ordered.setdefault(identifier, str(paper.get("regime_label", "")))
+    return [ordered[key] for key in sorted(ordered) if ordered[key]]
+
+
+def regime_palette(labels: Sequence[str]) -> dict[str, str]:
+    """Map each regime label to a stable colour, wrapping if there are more."""
+    return {
+        label: REGIME_PALETTE[position % len(REGIME_PALETTE)]
+        for position, label in enumerate(labels)
+    }

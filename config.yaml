@@ -25,7 +25,7 @@ corpus:
   # artificial gap in front of an older seed (Obayashi et al. 2026, Sec. 5.1).
   # Seeds themselves are always kept, regardless of their publication year.
   seed_year_offset: 2
-  lookback_years: 10
+  lookback_years: 12
 
   # --- Seed -> regime assignment: override with fallback -------------------
   # Priority 1: an explicit mapping in this block wins, keyed by PDF filename
@@ -40,7 +40,28 @@ corpus:
   # pin differently.  Example:
   #   seed_overrides:
   #     "TD JEPA.pdf": 2
-  seed_overrides: {}
+  # seed_overrides: {}
+  seed_overrides:
+      # Regime 0: Zero-Shot RL & Predictive Representations
+    "2103.07945v3.pdf": 0                                    # doc 2: FB representation
+    "Predictive Coding FB.pdf": 0                            # doc 8: Contrastive predictive coding
+    "TD JEPA.pdf": 0                                         # doc 9: TD-JEPA
+    "Towards Zero-Shot Robust Reinforcement Learning.pdf": 0 # doc 10: Robust zero-shot RL (BREEZE)
+    "zero shot.pdf": 0                                       # doc 15: Humanoid behavioral foundation models
+    "2511.04131.pdf": 0  # BFM-ZERO: unsupervised-RL humanoid FDM
+
+    # Regime 1: Sim-to-Real & Hardware Physics Adaptation
+    "2109.11978v3.pdf": 1                                    # doc 3: Legged Gym (ANYmal parallel RL)
+    "biro biped.pdf": 1                                      # doc 11: Stoch BiRo hardware control
+    "motor DR is more important than mass or inertia.pdf": 1 # doc 13: Static friction sim-to-real
+    "spi active paper.pdf": 1                                # doc 14: Active exploration SysID
+
+    # Regime 2: Dynamic Legged Control & Trajectory Optimization
+    "2012.06932v1.pdf": 2                                    # doc 1: CMA-ES warm starting
+    "2502.12555v1.pdf": 2                                    # doc 4: Contextual CMA-ES
+    "Feedback_Control_of_a_Cassie_Bipedal_Robot__Standing_and_Walking_Final.pdf": 2 # doc 6: Cassie feedback
+    "HIL_maybe_equation_for_judge_and_policy_can_be_applied_to_method.pdf": 2        # doc 7: Hybrid imitation
+    "cassie biped.pdf": 2                                    # doc 12: Cassie compliant walking
   # Reviewer flag: warn when the automatic similarity margin between the best
   # and second-best regime is below this value, i.e. the seed is ambiguous.
   seed_match_margin: 0.02
@@ -81,43 +102,46 @@ corpus:
 
 regimes:
   - id: 0
-    name: "Classical System Identification"
-    label: "SysID"
+    name: "Zero-Shot RL & Predictive Representations"
+    label: "ZeroShot-Rep"
     description: >-
-      Analytical / grey-box models, least squares, Kalman filtering, state
-      estimation for robotic and control systems.
-    query: 'abs:"system identification" AND (cat:cs.RO OR cat:eess.SY)'
-    # Domain keywords are used ONLY to match seeds to regimes.  They never
-    # reach the arXiv query above, which stays as validated.
+      Forward-backward representations, latent dynamics, successor features,
+      and unsupervised zero-shot reinforcement learning.
+    query: '(abs:"zero-shot" OR abs:"forward-backward" OR abs:"latent dynamics" OR abs:"successor feature") AND abs:"reinforcement learning" AND (cat:cs.RO OR cat:cs.LG)'
     keywords:
-      - "system identification"
-      - "kalman filter"
-      - "least squares"
-      - "grey-box model"
+      - "forward-backward"
+      - "zero-shot reinforcement learning"
+      - "latent dynamics"
+      - "successor features"
+      - "representation learning"
 
   - id: 1
-    name: "Domain Randomization & Sim-to-Real"
-    label: "Sim2Real"
+    name: "Sim-to-Real & Hardware Physics Adaptation"
+    label: "Sim2Real-Physics"
     description: >-
-      Stochastic physics perturbation, domain randomization, reality-gap
-      transfer bounds.
-    query: 'abs:"domain randomization" AND abs:"sim-to-real" AND cat:cs.RO'
+      Domain randomization, actuator dynamics, joint friction, system
+      identification, and sim-to-real transfer for legged systems.
+    query: '(abs:"sim-to-real" OR abs:"domain randomization") AND (abs:"friction" OR abs:"actuator" OR abs:"legged" OR abs:"system identification") AND cat:cs.RO'
     keywords:
       - "sim-to-real"
       - "domain randomization"
-      - "dynamics perturbation"
+      - "static friction"
+      - "actuator"
+      - "system identification"
 
   - id: 2
-    name: "Deep Reinforcement Learning Control"
-    label: "RL"
+    name: "Dynamic Legged Control & Trajectory Optimization"
+    label: "Legged-Control"
     description: >-
-      Policy gradient, actor-critic, PPO, stochastic policies, exploration and
-      sample efficiency for robotic manipulation.
-    query: 'abs:"reinforcement learning" AND abs:"manipulation" AND cat:cs.RO'
+      Feedback control, dynamic walking, virtual constraints, compliance, and
+      evolutionary optimization (CMA-ES) for bipedal and legged robots.
+    query: '(abs:"bipedal" OR abs:"legged" OR abs:"cassie") AND (abs:"feedback control" OR abs:"walking" OR abs:"cma-es" OR abs:"virtual constraints") AND (cat:cs.RO OR cat:eess.SY)'
     keywords:
-      - "reinforcement learning"
-      - "policy gradient"
-      - "robot manipulation"
+      - "bipedal robot"
+      - "dynamic walking"
+      - "feedback control"
+      - "cma-es"
+      - "compliance"
 
 # Phase 1: full-text extraction (Obayashi et al. 2026, Sec. 5.2: "PDF text was
 # extracted without OCR").  The paper never relied on abstract-only text, and

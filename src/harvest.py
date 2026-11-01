@@ -29,6 +29,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import re
@@ -224,6 +225,17 @@ def normalize_title(title: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", stripped)
 
 
+def arxiv_base_id(identifier: str) -> str:
+    """Strip an arXiv version suffix so ``2511.04131`` matches ``2511.04131v2``.
+
+    Seed identifiers come from PDF filenames, which may carry a version or omit
+    it, while the API always reports one.  Comparing raw strings therefore let a
+    seed back into the harvest under its versioned id, which the corpus verify
+    then reported as a duplicate title within a regime.
+    """
+    return re.sub(r"v\d+$", "", identifier.strip())
+
+
 # --------------------------------------------------------------------------- #
 # Harvesting
 # --------------------------------------------------------------------------- #
@@ -345,7 +357,7 @@ def harvest_regime_papers(
         raw_abstract = result.summary or ""
         title_key = normalize_title(raw_title)
 
-        if short_id in seen_ids or title_key in seen_titles:
+        if arxiv_base_id(short_id) in seen_ids or title_key in seen_titles:
             rejected_dupe += 1
             continue
 
@@ -384,7 +396,7 @@ def harvest_regime_papers(
         }
 
         collected.append(record)
-        seen_ids.add(short_id)
+        seen_ids.add(arxiv_base_id(short_id))
         seen_titles.add(title_key)
 
         LOGGER.info(
@@ -448,12 +460,14 @@ def harvest_all(
     config: dict[str, Any],
     start_year: int | None = None,
     seed_identifiers: Iterable[str] = (),
+    seed_titles: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Run the full three-regime harvest and return the corpus document.
 
     ``start_year`` applies the dynamic recency window as an arXiv
-    ``submittedDate`` clause.  ``seed_identifiers`` pre-registers seeding papers
-    so a seed that is itself on arXiv is never fetched a second time.
+    ``submittedDate`` clause.  ``seed_identifiers`` and ``seed_titles``
+    pre-register seeding papers so a seed that is itself on arXiv is never
+    fetched a second time, whether its filename yielded an id or not.
     """
     corpus_cfg = config.get("corpus", {})
     regimes: list[dict[str, Any]] = config.get("regimes", [])
@@ -475,12 +489,16 @@ def harvest_all(
         LOGGER.info("Recency window applied to every regime query: %s", window)
 
     client = build_client(corpus_cfg)
-    seen_ids: set[str] = {str(item) for item in seed_identifiers if item}
-    seen_titles: set[str] = set()
-    if seen_ids:
+    seen_ids: set[str] = {arxiv_base_id(str(item)) for item in seed_identifiers if item}
+    seen_titles: set[str] = {
+        key for key in (normalize_title(str(t)) for t in seed_titles if t) if key
+    }
+    if seen_ids or seen_titles:
         LOGGER.info(
-            "Pre-registering %d seeding arXiv IDs so none is harvested twice",
+            "Pre-registering %d seeding arXiv IDs and %d titles so none is "
+            "harvested twice",
             len(seen_ids),
+            len(seen_titles),
         )
     papers: list[dict[str, Any]] = []
 
@@ -656,6 +674,13 @@ FULLTEXT_MIN_ALNUM_RATIO = 0.75
 FULLTEXT_USER_AGENT = "ResearchRadar/0.1 (local research corpus; contact: repo owner)"
 
 _WHITESPACE_RE = re.compile(r"\s+")
+
+#: A removal upstream leaves a space in front of punctuation.  Tidying it is part
+#: of reaching a fixed point: the callout stripper does this too, but
+#: ``normalize_extracted_text`` collapses newlines *after* that, which turns
+#: ``(L1-LMS)\n,`` into ``(L1-LMS) ,`` and re-creates the artifact.  Both stages
+#: share the pattern so they cannot drift apart.
+_SPACE_BEFORE_PUNCT_RE = re.compile(r"[ \t]+([,.;:!?])")
 #: Text extracted from a PDF keeps the typesetter's hard line breaks. Joining on
 #: a bare newline preserves paragraph structure; a hyphen at end of line is a
 #: word that was split, so the hyphen and the break both have to go.
@@ -705,17 +730,30 @@ class TextQuality:
         }
 
 
+def repair_extracted_characters(text: str) -> str:
+    """Undo ligatures and end-of-line hyphenation without touching line breaks.
+
+    This runs twice: once before sanitation, because a word split as ``Bom-\nbois``
+    hides a citation from the callout stripper and only becomes visible once
+    rejoined, and again inside ``normalize_extracted_text`` for callers that start
+    from already-sanitised text.
+    """
+    for ligature, replacement in _LIGATURES.items():
+        text = text.replace(ligature, replacement)
+    return _HYPHEN_WRAP_RE.sub("", text)
+
+
 def normalize_extracted_text(text: str) -> str:
     """Repair the damage a PDF text layer inflicts on running prose."""
     if not text:
         return ""
-    for ligature, replacement in _LIGATURES.items():
-        text = text.replace(ligature, replacement)
-    text = _HYPHEN_WRAP_RE.sub("", text)
+    text = repair_extracted_characters(text)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     lines = [line.strip() for line in text.split("\n")]
     text = "\n".join(lines)
     text = _WHITESPACE_RE.sub(" ", text)
+    # Last, so that whitespace collapsed above cannot re-open the gap.
+    text = _SPACE_BEFORE_PUNCT_RE.sub(r"\1", text)
     return text.strip()
 
 
@@ -908,13 +946,11 @@ def strip_bibliography(
 #: from being deleted: an interval has a sign, an operator, or a word such as
 #: "in" / "between" in front of it.  Ranges are only stripped on an en or em
 #: dash, because ``[0-1]`` is far more often an interval than a citation.
-_CITATION_BRACKET_RE = re.compile(
-    r"\[\s*\d{1,4}[a-z]?(?:\s*[,;]\s*\d{1,4}[a-z]?)*\s*\]"
-)
-_CITATION_RANGE_RE = re.compile(r"\[\s*\d{1,4}\s*[\u2013\u2014]\s*\d{1,4}\s*\]")
+_BRACKET_NUMERIC_INNER = r"\[\s*\d{1,4}[a-z]?(?:\s*[,;]\s*\d{1,4}[a-z]?)*\s*\]"
+_BRACKET_DASH_RANGE_INNER = r"\[\s*\d{1,4}\s*[\u2013\u2014]\s*\d{1,4}\s*\]"
 #: ASCII-hyphen ranges are only stripped when they cannot be an interval: a
 #: citation range starts at 1 or above and increases, whereas ``[0-1]`` does not.
-_CITATION_HYPHEN_RANGE_RE = re.compile(r"\[\s*(\d{1,4})\s*-\s*(\d{1,4})\s*\]")
+_BRACKET_HYPHEN_RANGE_INNER = r"\[\s*(?P<low>\d{1,4})\s*-\s*(?P<high>\d{1,4})\s*\]"
 _CITATION_BRACKET_NAMED_RE = re.compile(r"\[[A-Z][^\]\n]{0,48}(?:19|20)\d{2}[a-z]?\]")
 #: Tokens that mark the preceding bracket as an interval, not a citation.
 #: A symbol or operator in front of the bracket is decisive.  The word list is
@@ -948,12 +984,29 @@ _STRUCTURAL_WORDS = (
     "Section|Table|Figure|Fig|Eq|Equation|Chapter|Algorithm|Appendix|Lemma|Theorem"
     "|Remark|Definition|Proposition|Corollary|Listing"
 )
-_CITATION_LEAD_SURNAME_RE = re.compile(
-    r"(?<=[a-z,;]\s)"
+#: The surname travels in the SAME match as the bracket it introduces, and only
+#: a numeric citation bracket can follow it.  Both properties are load-bearing
+#: for idempotency.  An earlier version matched a surname against ``(?=\[)``
+#: alone, i.e. against any bracket at all, so the table row
+#: ``Parameters Range Unit [0.5, 2.5]`` lost one capitalised word per pass -
+#: "Unit", then "Range", then "Parameters" - because deleting a word re-exposes
+#: the word before it.  Re-sanitising cached text therefore eroded the corpus a
+#: little further on every rebuild and moved the Pareto front.
+_CITATION_LEAD_PATTERN = (
+    r"(?P<lead>(?<=[a-z,;]\s)"
     r"(?!" + _STRUCTURAL_WORDS + r"\b)"
     r"[A-Z][A-Za-z'\u2019\-]{2,}"
     r"(?:\s+(?:et\s+al\.?|and\s+[A-Z][A-Za-z'\u2019\-]{2,}))?"
-    r"[ \t]*(?=\[)"
+    r"[ \t]*)?"
+)
+_CITATION_LEAD_HYPHEN_RE = re.compile(
+    _CITATION_LEAD_PATTERN + r"(?P<bracket>" + _BRACKET_HYPHEN_RANGE_INNER + r")"
+)
+_CITATION_LEAD_DASH_RE = re.compile(
+    _CITATION_LEAD_PATTERN + r"(?P<bracket>" + _BRACKET_DASH_RANGE_INNER + r")"
+)
+_CITATION_LEAD_NUMERIC_RE = re.compile(
+    _CITATION_LEAD_PATTERN + r"(?P<bracket>" + _BRACKET_NUMERIC_INNER + r")"
 )
 
 #: Parenthetical author-year callouts: ``(Smith, 2020)``,
@@ -1041,46 +1094,45 @@ def strip_running_headers(raw: str, repeat_threshold: int = 3) -> tuple[str, int
 
 
 def strip_citation_callouts(text: str) -> tuple[str, int]:
-    """Remove citation callouts and bibliographic locators from body prose."""
+    """Remove citation callouts and bibliographic locators from body prose.
+
+    Idempotent: a second application is a no-op.  The learner and the bracket
+    are removed as one match, so deleting a citation cannot re-expose the word
+    before it as a fresh match.  ``tests/test_sanitize.py`` pins this property
+    over every cached document, because the sanitizer runs again on cache hits.
+    """
     if not text:
         return text, 0
     removed = 0
 
-    def window_before(match: re.Match[str]) -> str:
-        return text[max(0, match.start() - 14) : match.start()]
+    def is_interval(match: re.Match[str]) -> bool:
+        """True when the bracket is a mathematical interval, not a citation."""
+        start = match.start("bracket")
+        window = text[max(0, start - 14) : start]
+        return bool(_CITATION_BRACKET_GUARD_RE.search(window))
 
     def drop_brackets(match: re.Match[str]) -> str:
         nonlocal removed
-        if _CITATION_BRACKET_GUARD_RE.search(window_before(match)):
+        if is_interval(match):
             return match.group(0)
         removed += 1
         return ""
 
     def drop_hyphen_range(match: re.Match[str]) -> str:
         nonlocal removed
-        low, high = int(match.group(1)), int(match.group(2))
+        low = int(match.group("low"))
+        high = int(match.group("high"))
         # A citation range starts at 1 and increases; an interval need not.
-        if low < 1 or high <= low:
-            return match.group(0)
-        if _CITATION_BRACKET_GUARD_RE.search(window_before(match)):
+        if low < 1 or high <= low or is_interval(match):
             return match.group(0)
         removed += 1
         return ""
 
-    # Surnames written immediately before a numeric citation go first, so that
-    # "see Smith et al. [12]" does not leave a bare surname in the prose.
-    text, count = _CITATION_LEAD_SURNAME_RE.subn("", text)
-    removed += count
-
-    for pattern in (
-        _CITATION_RANGE_RE,
-        _CITATION_HYPHEN_RANGE_RE,
-        _CITATION_BRACKET_RE,
-    ):
-        handler = (
-            drop_hyphen_range if pattern is _CITATION_HYPHEN_RANGE_RE else drop_brackets
-        )
-        text = pattern.sub(handler, text)
+    # Each pattern owns a disjoint bracket form, so the order only decides which
+    # label a removal is counted under.
+    text = _CITATION_LEAD_HYPHEN_RE.sub(drop_hyphen_range, text)
+    for pattern in (_CITATION_LEAD_DASH_RE, _CITATION_LEAD_NUMERIC_RE):
+        text = pattern.sub(drop_brackets, text)
     # A bracketed author-year (``[Smith 2020]``) can never be a numeric
     # interval, so it is removed without consulting the interval guard.
     text, count = _CITATION_BRACKET_NAMED_RE.subn("", text)
@@ -1093,7 +1145,7 @@ def strip_citation_callouts(text: str) -> tuple[str, int]:
         removed += count
 
     # Deleting a callout leaves a space before the punctuation that followed it.
-    text = re.sub(r"[ \t]+([,.;:!?])", r"\1", text)
+    text = _SPACE_BEFORE_PUNCT_RE.sub(r"\1", text)
     text = re.sub(r"\(\s*\)", "", text)
     text = re.sub(r"\[\s*\]", "", text)
     text = re.sub(r"[ \t]{2,}", " ", text)
@@ -1152,15 +1204,19 @@ def sanitize_document_text(
 ) -> SanitationResult:
     """Run the full Phase 1b sanitation chain, then normalize.
 
-    Order matters: front matter and running headers go first so heading
-    detection is not fooled by page furniture, then the bibliography is cut,
-    then callouts are removed from what remains of the body.
+    Order matters: character repair first, because a word hyphenated across a line
+    break hides whatever it completes; then front matter and running headers so
+    heading detection is not fooled by page furniture, then the bibliography, then
+    callouts removed from what remains of the body.
     """
-    without_headers, headers = strip_running_headers(raw)
-    # The title block is read from the RAW text: the running-header pass removes
+    repaired = repair_extracted_characters(raw)
+    without_headers, headers = strip_running_headers(repaired)
+    # The title block is read from the repaired text: the running-header pass removes
     # any line that repeats on several pages, and a paper whose title is stamped
     # on every page would otherwise lose its own title.
-    _, front_matter_text = split_front_matter(raw, min(FRONT_MATTER_LIMIT, len(raw)))
+    _, front_matter_text = split_front_matter(
+        repaired, min(FRONT_MATTER_LIMIT, len(repaired))
+    )
     body, _ = split_front_matter(without_headers)
     body, references, acknowledgments = strip_bibliography(body, min_body_words)
     body, citations = strip_citation_callouts(body)
@@ -1303,17 +1359,25 @@ def assess_text_quality(
     )
 
 
-def extract_pdf_text(
-    pdf_path: Path,
-    timeout: float = 300.0,
-    min_body_words: int = FULLTEXT_MIN_WORDS,
-) -> SanitationResult:
-    """Extract with ``mutool`` (MuPDF), then sanitize. Empty result on failure."""
+def extract_pdf_raw(pdf_path: Path, timeout: float = 300.0) -> str:
+    """Extract with ``mutool`` (MuPDF) and return the text exactly as it came out.
+
+    This is the layer that gets cached: sanitation is a pure function of it, so a
+    cache that stores raw text can always be re-sanitized under new rules.  Caching
+    the sanitized text instead makes the cache an unfixable record of whichever
+    rules were in force when it was written.
+
+    ``errors="replace"`` matters: a PDF text layer is not required to be valid
+    UTF-8, and MuPDF passes the font's bytes through unchanged.  Decoding strictly
+    made a single stray byte abort the whole extraction, which then reported the
+    paper as unreadable rather than as having one bad glyph.
+    """
     try:
         result = subprocess.run(
             ["mutool", "draw", "-F", "txt", "-o", "-", str(pdf_path)],
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=timeout,
             check=False,
         )
@@ -1323,7 +1387,7 @@ def extract_pdf_text(
         ) from exc
     except subprocess.TimeoutExpired:
         LOGGER.warning("mutool timed out after %.0fs on %s", timeout, pdf_path.name)
-        return SanitationResult(text="")
+        return ""
     if result.returncode != 0:
         LOGGER.debug(
             "mutool exited %d on %s: %s",
@@ -1331,28 +1395,36 @@ def extract_pdf_text(
             pdf_path.name,
             result.stderr.strip()[:300],
         )
-    return sanitize_document_text(result.stdout, min_body_words)
+    return result.stdout
 
 
-def extract_ar5iv_text(
-    arxiv_id: str,
-    session: requests.Session,
-    timeout: float = 45.0,
+def extract_pdf_text(
+    pdf_path: Path,
+    timeout: float = 300.0,
     min_body_words: int = FULLTEXT_MIN_WORDS,
 ) -> SanitationResult:
-    """Fallback: pull the arXiv HTML5 rendering (ar5iv), reduce it to text."""
+    """Extract with ``mutool`` (MuPDF), then sanitize. Empty result on failure."""
+    return sanitize_document_text(
+        extract_pdf_raw(pdf_path, timeout=timeout), min_body_words
+    )
+
+
+def extract_ar5iv_raw(
+    arxiv_id: str, session: requests.Session, timeout: float = 45.0
+) -> str:
+    """Fallback: pull the arXiv HTML5 rendering (ar5iv) and reduce it to raw text."""
     url = f"https://ar5iv.labs.arxiv.org/html/{arxiv_id}"
     try:
         response = session.get(url, timeout=timeout)
         response.raise_for_status()
     except requests.RequestException as exc:
         LOGGER.debug("ar5iv failed for %s: %s", arxiv_id, exc)
-        return SanitationResult(text="")
+        return ""
     try:
         document = lxml_html.fromstring(response.text)
     except (ValueError, TypeError) as exc:
         LOGGER.debug("ar5iv returned unparseable HTML for %s: %s", arxiv_id, exc)
-        return SanitationResult(text="")
+        return ""
     # The bibliography and the acknowledgments are navigation, not argument, so
     # they are dropped by element rather than by heading text.
     for node in document.xpath(
@@ -1365,8 +1437,19 @@ def extract_ar5iv_text(
         if parent is not None:
             parent.remove(node)
     nodes = document.xpath("//article") or document.xpath("//body")
-    text = "\n".join(node.text_content() for node in nodes)
-    return sanitize_document_text(text, min_body_words)
+    return "\n".join(node.text_content() for node in nodes)
+
+
+def extract_ar5iv_text(
+    arxiv_id: str,
+    session: requests.Session,
+    timeout: float = 45.0,
+    min_body_words: int = FULLTEXT_MIN_WORDS,
+) -> SanitationResult:
+    """Fallback: pull the arXiv HTML5 rendering (ar5iv), then sanitize."""
+    return sanitize_document_text(
+        extract_ar5iv_raw(arxiv_id, session, timeout=timeout), min_body_words
+    )
 
 
 def download_arxiv_pdf(
@@ -2135,15 +2218,16 @@ def extract_corpus_fulltext(
         result = SanitationResult(text="")
         quality = quality_gate.assess("")
         source = ""
+        raw_text: str | None = None
 
-        cached = cache_dir / f"{arxiv_id}.txt"
+        # The cache holds the *raw* extraction, so sanitation runs exactly once per
+        # build and the text can never drift across rebuilds.  Caching sanitized
+        # text instead made the cache an unfixable record of the rules that happened
+        # to be in force when it was written.
+        cached = cache_dir / f"{arxiv_id}.raw.txt"
         if cached.exists():
-            # The cache holds text that already went through sanitation, so this
-            # second pass finds nothing to strip; it is here to keep provenance
-            # honest rather than to re-do work.
-            result = sanitize_document_text(
-                cached.read_text(encoding="utf-8"), quality_gate.min_words
-            )
+            raw_text = cached.read_text(encoding="utf-8")
+            result = sanitize_document_text(raw_text, quality_gate.min_words)
             quality = quality_gate.assess(result.text)
             attempts.append("cache")
             source = "cache"
@@ -2152,6 +2236,7 @@ def extract_corpus_fulltext(
                     "Cached text for %s fails the audit; re-extracting", arxiv_id
                 )
                 cached.unlink()
+                raw_text = None
                 result = SanitationResult(text="")
                 quality = quality_gate.assess("")
                 source = ""
@@ -2161,17 +2246,15 @@ def extract_corpus_fulltext(
                 arxiv_id, cache_dir / "pdf", session, delay_seconds=delay_seconds
             )
             if pdf_path is not None:
-                result = extract_pdf_text(
-                    pdf_path, min_body_words=quality_gate.min_words
-                )
+                raw_text = extract_pdf_raw(pdf_path)
+                result = sanitize_document_text(raw_text, quality_gate.min_words)
                 quality = quality_gate.assess(result.text)
                 attempts.append(f"pdf:{'ok' if quality.ok else 'rejected'}")
                 source = "arxiv-pdf"
 
         if not quality.ok:
-            fallback = extract_ar5iv_text(
-                arxiv_id, session, min_body_words=quality_gate.min_words
-            )
+            raw_text = extract_ar5iv_raw(arxiv_id, session)
+            fallback = sanitize_document_text(raw_text, quality_gate.min_words)
             fallback_quality = quality_gate.assess(fallback.text)
             attempts.append(f"ar5iv:{'ok' if fallback_quality.ok else 'rejected'}")
             if fallback_quality.ok:
@@ -2179,7 +2262,8 @@ def extract_corpus_fulltext(
 
         if quality.ok:
             cached.parent.mkdir(parents=True, exist_ok=True)
-            cached.write_text(result.text, encoding="utf-8")
+            # Store what the extractor produced, not what sanitation made of it.
+            cached.write_text(raw_text or "", encoding="utf-8")
             LOGGER.info(
                 "  [%3d/%3d] %-10s %6d words via %-9s refs=-%d cites=%d",
                 position,
@@ -2212,6 +2296,29 @@ def extract_corpus_fulltext(
             )
         )
     return documents, failures
+
+
+def _text_fingerprint(papers: list[dict[str, Any]]) -> dict[str, Any]:
+    """Digest the sanitized text so a text-level drift shows up in ``corpus.json``.
+
+    Without this, a rebuild that changes the text but leaves the paper list intact
+    is invisible at the corpus level: the first symptom is a moved Pareto front,
+    which is exactly the symptom that is hardest to attribute.
+    """
+    digest = hashlib.new("md5", usedforsecurity=False)
+    characters = 0
+    for paper in papers:
+        text = str(paper.get("full_text", ""))
+        characters += len(text)
+        digest.update(str(paper.get("id", "")).encode("utf-8"))
+        digest.update(b"\x00")
+        digest.update(text.encode("utf-8"))
+        digest.update(b"\x00")
+    return {
+        "algorithm": "md5",
+        "digest": digest.hexdigest(),
+        "characters": characters,
+    }
 
 
 def _sanitation_totals(documents: list[ExtractedDocument]) -> dict[str, int]:
@@ -2375,6 +2482,7 @@ def build_fulltext_corpus(config: dict[str, Any]) -> dict[str, Any]:
         config,
         start_year=start_year,
         seed_identifiers=(doc.identifier for doc in seeds),
+        seed_titles=(doc.title for doc in seeds),
     )
     harvested_papers = harvested["papers"]
     if not harvested_papers:
@@ -2418,12 +2526,15 @@ def build_fulltext_corpus(config: dict[str, Any]) -> dict[str, Any]:
         papers.append(_harvested_record(paper, document, offset + index))
 
     if len(papers) != target_total:
-        LOGGER.warning(
-            "Corpus has %d documents, config wants %d (seeds %d + harvested %d)",
-            len(papers),
-            target_total,
-            len(seeds),
-            len(harvested_papers),
+        # A short corpus must never be written: overwriting a complete corpus with a
+        # partial one is silent data loss, and the only way it happens is a harvest
+        # that came back short (arXiv answers 503 under load and returns nothing for
+        # the regime being asked).  The existing corpus files stay untouched.
+        raise SystemExit(
+            f"Harvest produced {len(harvested_papers)} papers for "
+            f"{len(seeds)} seeds, giving {len(papers)} documents where the config "
+            f"wants {target_total}. Refusing to overwrite the existing corpus. "
+            f"arXiv was probably rate limiting; re-run when it recovers."
         )
 
     counts: dict[str, int] = {}
@@ -2453,6 +2564,11 @@ def build_fulltext_corpus(config: dict[str, Any]) -> dict[str, Any]:
         "seeds_dir": str(desired_dir),
         "corpus_path": str(corpus_path),
         "extractor": "mutool (MuPDF) with ar5iv HTML fallback",
+        "fulltext_cache": {
+            "stores": "raw extraction (sanitation runs once per build)",
+            "dir": str(cache_dir),
+        },
+        "text_fingerprint": _text_fingerprint(papers),
         "quality_gate": gate.as_dict(),
         "sanitation": {
             "rule": (
@@ -2496,6 +2612,107 @@ def build_fulltext_corpus(config: dict[str, Any]) -> dict[str, Any]:
         len(harvested_papers),
         out_path,
     )
+    return payload
+
+
+def refresh_fulltext_from_cache(config: dict[str, Any]) -> dict[str, Any]:
+    """Re-sanitise an existing corpus from the raw cache, without touching arXiv.
+
+    Sanitation is a pure function of the raw extraction, and the cache holds that
+    extraction, so a change to the sanitiser can be applied offline.  Requiring a
+    fresh harvest to re-run a text rule would put a network outage between the rule
+    and the corpus it governs, and would silently change the paper list as well.
+
+    Only ``full_text``, ``extraction`` and ``sanitation`` are recomputed; every
+    other field (doc order, regime assignment, seed flags, provenance) is preserved
+    exactly as it stands, so a text-rule change cannot perturb the corpus itself.
+    """
+    fulltext_cfg = config.get("fulltext", {}) or {}
+    corpus_cfg = config.get("corpus", {}) or {}
+    fulltext_path = Path(fulltext_cfg.get("output_path", "data/corpus_fulltext.json"))
+    desired_dir = Path(fulltext_cfg.get("seeds_dir", "docs/papers/desired"))
+    cache_dir = Path(fulltext_cfg.get("cache_dir", "data/fulltext_cache"))
+    gate = QualityGate.from_config(fulltext_cfg)
+
+    payload = load_corpus(fulltext_path)
+    papers = payload.get("papers", [])
+    if not papers:
+        raise SystemExit(f"No papers to refresh in {fulltext_path}")
+
+    refreshed = 0
+    missing: list[str] = []
+    for paper in papers:
+        arxiv_id = str(paper["id"])
+        raw_text = ""
+        raw_source = ""
+
+        if paper.get("is_seed"):
+            source_file = str(paper.get("source_file") or "")
+            pdf_path = desired_dir / source_file
+            if source_file and pdf_path.is_file():
+                raw_text = extract_pdf_raw(pdf_path)
+                raw_source = "seed-pdf"
+        else:
+            cached = cache_dir / f"{arxiv_id}.raw.txt"
+            if cached.is_file():
+                raw_text = cached.read_text(encoding="utf-8")
+                raw_source = "cache"
+
+        if not raw_text.strip():
+            missing.append(arxiv_id)
+            continue
+
+        result = sanitize_document_text(raw_text, gate.min_words)
+        quality = gate.assess(result.text)
+        if not quality.ok:
+            LOGGER.error(
+                "Refreshed text for %s fails the audit: %s",
+                arxiv_id,
+                "; ".join(quality.reasons),
+            )
+            missing.append(arxiv_id)
+            continue
+
+        paper["full_text"] = result.text
+        paper["extraction"] = {
+            "source": raw_source,
+            "attempts": [*(paper.get("extraction", {}).get("attempts") or []), "refresh"],
+            **quality.as_dict(),
+        }
+        paper["sanitation"] = result.as_dict()
+        refreshed += 1
+
+    if missing:
+        raise SystemExit(
+            f"Cannot refresh text for {len(missing)} paper(s) with no raw "
+            f"source: {', '.join(missing)}"
+        )
+
+    metadata = payload.setdefault("metadata", {})
+    metadata["text_fingerprint"] = _text_fingerprint(papers)
+    metadata["fulltext_cache"] = {
+        "stores": "raw extraction (sanitation runs once per build)",
+        "dir": str(cache_dir),
+    }
+    metadata["sanitation"] = {
+        **(metadata.get("sanitation") or {}),
+        "refreshed_from_cache": refreshed,
+        "refreshed_at_rule": "raw cache + current sanitizer, no network",
+    }
+
+    write_corpus(payload, fulltext_path)
+
+    # corpus.json carries metadata only; keep its fingerprint in step.
+    corpus_path = Path(corpus_cfg.get("output_path", "data/corpus.json"))
+    if corpus_path.is_file():
+        corpus_payload = load_corpus(corpus_path)
+        corpus_payload.setdefault("metadata", {})["text_fingerprint"] = (
+            metadata["text_fingerprint"]
+        )
+        corpus_payload["metadata"]["fulltext_cache"] = metadata["fulltext_cache"]
+        write_corpus(corpus_payload, corpus_path)
+
+    LOGGER.info("Refreshed %d document(s) from the raw cache", refreshed)
     return payload
 
 
@@ -2658,6 +2875,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Only verify an existing full-text corpus file",
     )
+    parser.add_argument(
+        "--refresh-fulltext",
+        action="store_true",
+        help=(
+            "Re-sanitise every document from the raw full-text cache without "
+            "contacting arXiv, keeping the paper list unchanged"
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -2708,6 +2933,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.verify_only:
         corpus = load_corpus(out_path)
         return 0 if verify_corpus(corpus, target_per_regime) else 1
+
+    if args.refresh_fulltext:
+        payload = refresh_fulltext_from_cache(config)
+        return (
+            0
+            if verify_fulltext(
+                fulltext_path,
+                len(payload["papers"]),
+                QualityGate.from_config(fulltext_cfg),
+                expected_seeds=int(payload["metadata"]["n_seeds"]),
+            )
+            else 1
+        )
 
     if args.extract_text:
         payload = build_fulltext_corpus(config)
