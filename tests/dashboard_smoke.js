@@ -209,6 +209,18 @@ if (!main) {
   else pass("regime legend rendered from the payload: " +
     DATA.regimes.map((r) => r.label).join(", "));
 
+  /* Two phrases name a region but do not explain it, so the hover title carries
+     the rest.  Checked only when the payload has summaries at all: a seed-first
+     corpus has no discovered regions and therefore nothing to summarise. */
+  const summarised = DATA.regimes.filter((r) => r.summary);
+  if (summarised.length > 0) {
+    const titled = legendItems.filter((item) => item.attributes.title);
+    if (titled.length !== summarised.length)
+      fail("regime legend has " + titled.length + " hover titles, payload has " +
+        summarised.length + " summaries");
+    else pass("regime legend carries a hover summary for every discovered region");
+  }
+
   if (seeds.length > 1) fail("expected at most one seeding-paper trace, found " + seeds.length);
   else if (seeds.length === 0) {
     if (DATA.papers.some((p) => p.is_seed))

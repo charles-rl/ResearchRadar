@@ -1164,7 +1164,9 @@ def _persist_discovered_regimes(
         label = str(paper["regime_label"])
         counts[label] = counts.get(label, 0) + 1
 
-    corpus.setdefault("metadata", {})["regimes_auto"] = discovered.as_metadata(query=query)
+    corpus.setdefault("metadata", {})["regimes_auto"] = discovered.as_metadata(
+        query=query
+    )
     corpus["metadata"]["regime_counts"] = counts
     corpus["metadata"]["n_seeds"] = sum(1 for paper in papers if paper.get("is_seed"))
 
@@ -1176,7 +1178,9 @@ def _persist_discovered_regimes(
             with paths.corpus_fulltext.open("r", encoding="utf-8") as handle:
                 previous = json.load(handle)
         except (OSError, json.JSONDecodeError) as exc:
-            LOGGER.warning("Cannot read %s to refresh regimes: %s", paths.corpus_fulltext, exc)
+            LOGGER.warning(
+                "Cannot read %s to refresh regimes: %s", paths.corpus_fulltext, exc
+            )
             previous = {}
         for entry in previous.get("papers", []):
             text = entry.get("full_text")
@@ -1281,16 +1285,14 @@ def main(argv: list[str] | None = None) -> int:
         # papers; doing it anywhere later would let the chart and the legend
         # disagree for one stage.
         #
-        # Naming uses the whole-word vocabulary, not the n-gram features that
-        # build the representation: an n-gram label reads as ``obotwin · priva``,
-        # which names nothing.  Imported here rather than at module scope because
-        # ``src.report`` pulls in the rendering stack this stage does not need.
-        from .report import build_vocabulary
-
-        vocabulary = build_vocabulary(representation)
+        # Naming reads each region's titles and abstracts.  It does not use the
+        # representation's own terms: those are character n-grams, so a region
+        # ends up called ``obotwin · priva``, which names nothing, and it does not
+        # use the extracted full text either, where one cited surname repeated in
+        # a section beats every real topic phrase.
         discovered = discover_regimes(
             coords=manifold.coords,
-            vocabulary=vocabulary,
+            papers=papers,
             discovery_k=config_int(single_field_settings(config), "discovery_k", 5),
             reference_k=config_int(single_field_settings(config), "reference_k", 8),
         )

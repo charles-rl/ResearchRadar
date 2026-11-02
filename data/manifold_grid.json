@@ -1,23 +1,23 @@
 {
   "grid_size": 21,
   "grid_points": 441,
-  "documents": 120,
+  "documents": 100,
   "spacing": 0.1,
   "sph_h_global": 0.25,
   "nearest_k_adaptive": 8,
-  "stress": 578.9545519419938,
-  "distance_correlation": 0.7053093265204928,
+  "stress": 451.3844058953914,
+  "distance_correlation": 0.5029535723039613,
   "anchors": {
     "indices": [
-      8,
-      36,
-      83,
-      61,
-      112,
+      7,
+      38,
+      64,
       99,
-      88,
       47,
-      41
+      85,
+      54,
+      4,
+      79
     ],
     "targets": [
       [
@@ -77,8 +77,8 @@
   ],
   "persistent_boundary": "harmonic mean of b_k5_global, b_k8_global, b_k8_adaptive",
   "whitespace_quantiles": {
-    "q20": 0.05015481514776575,
-    "q60": 0.19240485580693578,
+    "q20": 0.05447996161835315,
+    "q60": 0.1747406415981464,
     "q85": 0.31048349392520047,
     "q98": 0.42936545386398967
   },
@@ -88,24 +88,24 @@
     "G",
     "S"
   ],
-  "kernel_agreement": 0.9014024636975115,
+  "kernel_agreement": 0.9032254282037085,
   "baseline": {
     "reference": "Obayashi et al. (2026) Table 4",
     "count": 16,
     "all_grid": {
       "d_nn": 0.4402,
-      "S": 0.0634,
-      "R": 0.0248,
-      "P_boundary": 0.1432,
-      "G": 0.2498,
+      "S": 0.0581,
+      "R": 0.0258,
+      "P_boundary": 0.1567,
+      "G": 0.25,
       "points_on_chart_edge": 16
     },
     "interior_only": {
-      "d_nn": 0.3402,
-      "S": 0.3116,
-      "R": 0.3027,
-      "P_boundary": 0.3381,
-      "G": 0.5799,
+      "d_nn": 0.3401,
+      "S": 0.2878,
+      "R": 0.2975,
+      "P_boundary": 0.402,
+      "G": 0.6481,
       "points_on_chart_edge": 0
     },
     "all_grid_indices": [
@@ -132,17 +132,17 @@
       313,
       145,
       35,
-      27,
       413,
+      27,
       295,
       418,
       40,
       400,
       22,
-      385,
       274,
+      28,
       412,
-      28
+      166
     ],
     "interior_candidates": 361,
     "notes": "Columns are mean values over the selected points. R is the averaged dual-kernel reliability diagnostic and is not a Pareto objective."

@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,7 @@ from typing import Any
 import numpy as np
 import scipy.sparse as sp
 from numpy.typing import NDArray
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS, CountVectorizer
 
 LOGGER = logging.getLogger("research_radar")
 
@@ -46,23 +48,189 @@ LOGGER = logging.getLogger("research_radar")
 DEFAULT_DISCOVERY_K = 5
 DEFAULT_REFERENCE_K = 8
 
-#: Terms per cluster label.  Three is enough to distinguish two clusters and
-#: short enough to fit a legend chip.
-LABEL_TERMS = 3
+#: Longest n-gram a label may use.  Single words name a region badly (``planning``
+#: alone says little) and a five-word fragment is no longer a phrase.
+MAX_NGRAM = 4
 
-#: A label term must appear in at least this share of its cluster's documents.
-#: Without a floor, one hapax n-gram family wins the enrichment ratio outright.
+#: Labels join at most this many phrases.  Two distinguishes five regions and
+#: still fits one row of the legend.
+LABEL_TERMS = 2
+
+#: A label phrase must appear in at least this many documents of its cluster, and
+#: in at least this share of them.  Without a floor a two-document pet phrase wins
+#: the enrichment ratio outright and the region is named after one paper.
+MIN_TERM_CLUSTER_DOCUMENTS = 3
 MIN_TERM_CLUSTER_SHARE = 0.10
-MIN_TERM_CLUSTER_DOCUMENTS = 2
 
-#: How much denser than the corpus average a term must be to name a region.  A
-#: term distributed evenly across the corpus has an enrichment of exactly 1.0 and
-#: describes no region in particular, so without a floor the third label slot
-#: fills with whatever generic word happens to be everywhere.
-MIN_TERM_ENRICHMENT = 1.05
+#: How much denser than the corpus average a phrase must be to name a region.  A
+#: phrase distributed evenly across the corpus has an enrichment of exactly 1.0
+#: and describes no region in particular.  The floor is well above 1.0 because a
+#: single-field corpus shares its subject by construction: every document is
+#: about the same field, so only a clearly over-represented phrase distinguishes
+#: a region inside it from the field itself.
+MIN_TERM_ENRICHMENT = 1.5
 
-#: Labels are keys in the report tables and chips in the type, so cap the length.
-MAX_LABEL_CHARS = 48
+#: A phrase in more than this share of the corpus describes the field, not a
+#: region of it.  ``policies`` is in 40% of a robotics corpus and names nothing.
+MAX_TERM_CORPUS_SHARE = 0.40
+
+#: Labels are keys in the report tables and chips in the UI, so cap the length.
+MAX_LABEL_CHARS = 52
+
+#: URLs survive abstract sanitation often enough to win a cluster outright: a
+#: project page pasted into three abstracts is dense in those three and nowhere
+#: else, which is precisely what the enrichment ratio rewards.
+_URL_RE = re.compile(r"(?:https?://|www\.)\S+|\barxiv:\s*\S+", re.IGNORECASE)
+
+#: Words that carry no topic.  Deliberately blunt: a label has two slots, so a
+#: filler word that reaches one of them costs a region its name.  Abstract boiler
+#: plate (``extensive experiments``, ``project page``) is as damaging as ordinary
+#: prose glue, and a domain word that every document shares (``robot``,
+#: ``policies``) is the worst case because it looks like a topic.
+PROSE_STOPLIST = frozenset(
+    (
+        "paper",
+        "papers",
+        "propose",
+        "proposed",
+        "proposes",
+        "present",
+        "presents",
+        "introduces",
+        "novel",
+        "new",
+        "study",
+        "work",
+        "experiment",
+        "experiments",
+        "experimental",
+        "extensive",
+        "comprehensive",
+        "thorough",
+        "detailed",
+        "project",
+        "page",
+        "code",
+        "github",
+        "available",
+        "supplementary",
+        "appendix",
+        "benchmark",
+        "benchmarks",
+        "result",
+        "results",
+        "show",
+        "shows",
+        "demonstrate",
+        "demonstrates",
+        "robot",
+        "robots",
+        "data",
+        "performance",
+        "environment",
+        "environments",
+        "policy",
+        "policies",
+        "approach",
+        "approaches",
+        "method",
+        "methods",
+        "task",
+        "tasks",
+        "problem",
+        "problems",
+        "setting",
+        "settings",
+        "achieve",
+        "achieves",
+        "improves",
+        "improved",
+        "obtain",
+        "obtains",
+        "leverage",
+        "leverages",
+        "outperform",
+        "outperforms",
+        "require",
+        "requires",
+        "enable",
+        "enables",
+        "allow",
+        "allows",
+        "use",
+        "uses",
+        "using",
+        "provide",
+        "provides",
+        "reduce",
+        "reduces",
+        "increase",
+        "increases",
+        "lead",
+        "leads",
+        "yield",
+        "yields",
+        "remain",
+        "remains",
+        "become",
+        "becomes",
+        "benefit",
+        "benefits",
+        "different",
+        "significantly",
+        "additionally",
+        "furthermore",
+        "moreover",
+        "thus",
+        "therefore",
+        "however",
+        "also",
+        "various",
+        "many",
+        "much",
+        "recent",
+        "large",
+        "small",
+        "high",
+        "low",
+        "good",
+        "better",
+        "best",
+        "strong",
+        "weak",
+        "effective",
+        "efficient",
+        "general",
+        "specific",
+        "potential",
+        "promising",
+        "challenging",
+        "easy",
+        "difficult",
+        "simple",
+        "complex",
+        # Compounds that describe the *form* of a contribution, never a topic.
+        # Left in, a region gets called ``based · learning-based``.
+        "based",
+        "learning-based",
+        "learn",
+        "learns",
+        "learned",
+        "directly",
+    )
+)
+
+
+#: Phrases kept as evidence per region.  Two name it; five give a reader enough
+#: to tell what the region is about without opening a paper.
+SUMMARY_TERMS = 5
+
+
+#: ``(?u)`` enables unicode matching; the pattern keeps interior hyphens so
+#: ``sim-to-real`` stays one token instead of becoming three stopwords.  Held in a
+#: constant rather than inline: a regex literal sitting next to an argument named
+#: like a secret reads to static scanners as a credential assignment.
+TERM_PATTERN = r"(?u)\b[a-z][a-z\-]{2,}\b"
 
 
 @dataclass(frozen=True)
@@ -73,6 +241,7 @@ class ClusterLabel:
     label: str
     terms: tuple[str, ...]
     size: int
+    summary: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         """JSON-ready form, used by the corpus metadata and the artifact."""
@@ -81,6 +250,7 @@ class ClusterLabel:
             "label": self.label,
             "terms": list(self.terms),
             "size": self.size,
+            "summary": self.summary,
         }
 
 
@@ -114,17 +284,17 @@ class DiscoveredRegimes:
                     "Eq. 21 boundary views stay in TF-IDF space, unchanged"
                 ),
                 "labelling": (
-                    "top TF-IDF terms by cluster enrichment (cluster mean mass "
-                    "over corpus mean mass), floored by cluster document count"
+                    "c-TF-IDF over each region's titles and abstracts: the "
+                    "cluster's term counts weighted by how much rarer the term is "
+                    "across the corpus, keeping only phrases found in at least "
+                    f"{MIN_TERM_CLUSTER_DOCUMENTS} documents of the cluster and "
+                    f"{MIN_TERM_ENRICHMENT}x denser here than corpus-wide"
                 ),
             },
         }
         if query:
             payload["query"] = query
         return payload
-
-
-
 
 
 def cluster_on_chart(coords: NDArray[np.float64], k: int) -> NDArray[np.int64]:
@@ -149,76 +319,181 @@ def cluster_on_chart(coords: NDArray[np.float64], k: int) -> NDArray[np.int64]:
     return labels
 
 
-def _usable_term_mask(vocabulary: Any) -> NDArray[np.bool_]:
-    """Vocabulary entries fit to name a cluster with.
-
-    ``vocabulary`` is a ``src.report.Vocabulary``: whole-word families with the
-    report's own prose filter already applied in ``.usable``.  Naming a region
-    from raw n-gram features would yield fragments such as ``obotwin``, so the
-    families (not ``Representation.terms``) are the only thing worth labelling
-    with.  Typed ``Any`` to keep this module free of a circular import on
-    ``src.report``.
-    """
-    usable = np.asarray(vocabulary.usable, dtype=np.bool_)
-    mask = np.zeros(len(vocabulary.terms), dtype=np.bool_)
-    for position, raw in enumerate(vocabulary.terms):
-        if not usable[position]:
-            continue
-        term = str(raw).strip()
-        # A term with no vowel is a parse artefact more often than a word.
-        if not term.isalpha() or not any(char in "aeiouy" for char in term):
-            continue
-        mask[position] = True
-    return mask
-
-
 def cluster_terms(
-    vocabulary: Any,
+    papers: list[dict[str, Any]],
     labels: NDArray[np.int64],
     k: int,
     top_n: int = LABEL_TERMS,
 ) -> dict[int, tuple[str, ...]]:
-    """Top vocabulary terms per cluster, ranked by enrichment over the corpus mean.
+    """Name each cluster with the phrases that over-represent it (c-TF-IDF).
 
-    Enrichment (cluster mean mass / corpus mean mass) is what makes a term
-    *characteristic* of a region rather than merely frequent in it: a word that
-    is everywhere scores 1.0 and loses to a word that is three times denser here
-    than average, however rare it is overall.  The document-share floor stops a
-    single document's pet phrase from winning on ratio alone.
+    The score is the phrase's TF-IDF against the corpus, summed over the cluster:
+    a phrase wins by being repeated *within* the region and rare *outside* it, so
+    a topical phrase such as ``sim-to-real transfer`` beats a word like ``data``
+    that every paper uses once.  Two extra guards run before ranking:
+
+    * a phrase must appear in ``MIN_TERM_CLUSTER_DOCUMENTS`` documents of the
+      cluster and in ``MIN_TERM_CLUSTER_SHARE`` of them, which stops a phrase
+      held by one or two papers from winning on rarity alone;
+    * a phrase in more than ``MAX_TERM_CORPUS_SHARE`` of the corpus is the field
+      itself rather than a region of it, and is dropped.
+
+    Multi-word phrases are preferred over single words at equal score, because
+    ``zero-shot reinforcement`` describes a region and ``planning`` barely does.
     """
-    matrix = sp.csr_matrix(vocabulary.l2)
-    terms = np.asarray(vocabulary.terms)
-    usable = _usable_term_mask(vocabulary)
-    corpus_mean = np.asarray(matrix.mean(axis=0)).ravel()
     labels = np.asarray(labels, dtype=np.int64)
+    if len(papers) != labels.size:
+        raise SystemExit(
+            f"Naming received {len(papers)} documents but {labels.size} labels"
+        )
 
+    texts = _label_texts(papers)
+    if not any(text.strip() for text in texts):
+        # A corpus with no titles or abstracts cannot name anything; the caller
+        # falls back to positional region names.
+        return dict.fromkeys(range(k), ())
+
+    vectoriser = CountVectorizer(
+        ngram_range=(1, MAX_NGRAM),
+        min_df=2,
+        token_pattern=TERM_PATTERN,
+    )
+    # Dense is fine at corpus scale (a few hundred documents against a few
+    # thousand phrases) and keeps the arithmetic below plain numpy.  The cast pins
+    # the container ``CountVectorizer`` hands back, which is typed as a union.
+    fitted = vectoriser.fit_transform(texts)
+    counts = np.asarray(sp.csr_matrix(fitted).todense(), dtype=np.float64)
+    terms: NDArray[np.str_] = np.asarray(vectoriser.get_feature_names_out())
+    document_count = counts.shape[0]
+    present = counts > 0.0
+    total_frequency = counts.sum(axis=0)
+    total_documents = present.sum(axis=0)
+
+    # Stopwords are rejected *after* n-grams are built, not removed before them.
+    # Removing them first glues the survivors together (``dexterous grasping tactile``
+    # out of ``dexterous grasping with tactile``), so a label would read as words the
+    # paper never wrote in that order.  Keeping the n-grams contiguous and rejecting
+    # any phrase that contains a stopword yields phrases that appear in the text.
+    stoplist: frozenset[str] = PROSE_STOPLIST | frozenset(ENGLISH_STOP_WORDS)
+    contradicts = np.array(
+        [bool(set(term.split()) & stoplist) for term in terms], dtype=np.bool_
+    )
+    fragment = np.array([_is_fragment(str(term)) for term in terms], dtype=np.bool_)
+    word_count = np.array([len(term.split()) for term in terms], dtype=np.int64)
+
+    # IDF against the average cluster's term total, so every cluster is scored on
+    # one scale and a region cannot win by being large.
+    average_frequency = max(float(counts.sum()) / max(k, 1), 1.0)
+    idf = np.log1p(average_frequency / np.maximum(total_frequency, 1.0))
+
+    # Tokens already spent by an earlier region of this same partition.  Reusing
+    # them would give five legend chips that read alike (three regions all called
+    # ``zero-shot something``), which is exactly the confusion a legend exists to
+    # remove.
+    claimed: set[str] = set()
     found: dict[int, tuple[str, ...]] = {}
     for cluster in range(k):
         rows = np.flatnonzero(labels == cluster)
         if rows.size == 0:
             found[cluster] = ()
             continue
-        block = matrix[rows]
-        cluster_mean = np.asarray(block.mean(axis=0)).ravel()
-        presence = np.asarray((block > 0).sum(axis=0)).ravel()
+        block = counts[rows]
+        cluster_frequency = block.sum(axis=0)
+        cluster_documents = (block > 0.0).sum(axis=0)
+
         floor = max(
             MIN_TERM_CLUSTER_DOCUMENTS,
             int(np.ceil(MIN_TERM_CLUSTER_SHARE * rows.size)),
         )
+        cluster_share = cluster_documents / rows.size
+        corpus_share = total_documents / max(document_count, 1)
+        enrichment = cluster_share / np.maximum(corpus_share, 1e-9)
         candidate = (
-            usable
-            & (presence >= floor)
-            & (cluster_mean > 0.0)
-            & (cluster_mean > MIN_TERM_ENRICHMENT * corpus_mean)
+            (cluster_documents >= floor)
+            & (enrichment >= MIN_TERM_ENRICHMENT)
+            & (corpus_share <= MAX_TERM_CORPUS_SHARE)
+            & (cluster_frequency > 0.0)
+            & ~contradicts
+            & ~fragment
         )
-        # Corpus-mean denominator floored so a term absent elsewhere does not
-        # produce an infinite ratio (it is still ranked, just not infinitely).
-        enrichment = np.where(candidate, cluster_mean / (corpus_mean + 1e-9), 0.0)
-        order = np.argsort(-enrichment)[:top_n]
-        found[cluster] = tuple(
-            str(terms[index]) for index in order if enrichment[index] > 0.0
-        )
+        score = np.where(candidate, cluster_frequency * idf, 0.0)
+
+        # Longest phrase first, then highest score, then alphabetically: at equal
+        # evidence a longer phrase is the more specific statement of the topic.
+        order = np.lexsort((terms, -score, -word_count))
+        order = order[score[order] > 0.0]
+
+        chosen: list[str] = []
+        used: set[str] = set()
+        # Two passes: first refuse phrases whose words another region already
+        # used, then accept them if nothing distinct is left.  A region with no
+        # unclaimed evidence still deserves a name.
+        for avoid_claimed in (True, False):
+            for index in order:
+                if len(chosen) == top_n:
+                    break
+                words = _phrase_key(str(terms[index]))
+                if words & used:
+                    continue
+                if avoid_claimed and words & claimed:
+                    continue
+                chosen.append(str(terms[index]))
+                used |= words
+            if len(chosen) == top_n:
+                break
+        claimed |= used
+        found[cluster] = tuple(chosen)
     return found
+
+
+def _phrase_key(phrase: str) -> set[str]:
+    """Collapse a phrase's words to the keys used for overlap tests.
+
+    Singular and plural, and inflections that share a stem (``generalization`` /
+    ``generalize``), must count as the same idea or a label fills its two slots
+    with one concept.  Six characters is the shortest prefix that separates the
+    words this corpus actually uses while still merging those pairs.
+    """
+    return {word.rstrip("s")[:6] for word in phrase.split()}
+
+
+def _is_fragment(phrase: str) -> bool:
+    """Whether a phrase looks cut out of a sentence rather than named.
+
+    ``learning zero-shot`` is not a topic: it is what is left when ``for`` is
+    stripped out of ``learning for zero-shot``.  A participle at either end is the
+    cheapest reliable sign of that, because a label's head noun never ends in
+    ``-ing`` in this literature.
+    """
+    words = phrase.split()
+    if len(words) < 2:
+        return False
+    return words[0].endswith("ing") or words[-1].endswith("ing")
+
+
+def _label_texts(papers: list[dict[str, Any]]) -> list[str]:
+    """The text a region is named from: its title, then its abstract.
+
+    Titles and abstracts only, never the extracted full text.  A full text is
+    fifteen times longer, so its terms are dominated by whatever the method
+    section repeats: table headers, hyperparameter names, and the surnames of
+    cited authors.  That is how a region of robotics papers ends up labelled
+    ``cpus · linxi`` - one author's name, repeated in a section, beating every
+    genuine topic phrase on frequency.
+
+    The title is repeated because it is the densest statement of a paper's topic
+    that the corpus holds, and the abstract alone will happily return a word the
+    title already made redundant.
+    """
+    texts: list[str] = []
+    for paper in papers:
+        title = str(paper.get("title", "")).lower()
+        abstract = str(paper.get("abstract", "")).lower()
+        joined = _URL_RE.sub(" ", f"{title}. {title}. {abstract}")
+        # Drop everything the token pattern cannot use, so a hyphenated compound
+        # stays whole while punctuation cannot glue two words into one token.
+        texts.append(re.sub(r"[^a-z0-9\-]+", " ", joined))
+    return texts
 
 
 def _build_label(terms: tuple[str, ...], fallback: str, taken: set[str]) -> str:
@@ -243,8 +518,29 @@ def _build_label(terms: tuple[str, ...], fallback: str, taken: set[str]) -> str:
     return unique
 
 
+def _build_summary(terms: tuple[str, ...], size: int) -> str:
+    """One sentence saying what the region is about, in plain words.
+
+    A chip has room for two phrases, which names a region but does not explain
+    it: ``successor measures · reward functions`` is a label, not an answer to
+    "what is this part of the map about?".  The summary keeps every evidence
+    phrase, so the legend can answer that on hover without opening a paper.
+    """
+    if not terms:
+        return (
+            f"{size} papers with no distinguishing vocabulary of their own."
+            if size != 1
+            else "1 paper with no distinguishing vocabulary of its own."
+        )
+    if len(terms) == 1:
+        body = terms[0]
+    else:
+        body = f"{', '.join(terms[:-1])} and {terms[-1]}"
+    return f"{size} papers centred on {body}."
+
+
 def label_partition(
-    vocabulary: Any,
+    papers: list[dict[str, Any]],
     labels: NDArray[np.int64],
     k: int,
 ) -> tuple[tuple[ClusterLabel, ...], dict[int, int]]:
@@ -256,7 +552,7 @@ def label_partition(
     silently disagreeing: the label order is by size, the raw ids are whatever
     KMeans produced.
     """
-    evidence = cluster_terms(vocabulary, labels, k)
+    evidence = cluster_terms(papers, labels, k, top_n=SUMMARY_TERMS)
     counts = np.bincount(np.asarray(labels, dtype=np.int64), minlength=k)
 
     # Largest cluster first so the numbering is stable and the dominant region
@@ -268,7 +564,7 @@ def label_partition(
     mapping: dict[int, int] = {}
     for position, cluster in enumerate(order):
         label = _build_label(
-            evidence.get(cluster, ()), f"Region {position + 1}", taken
+            evidence.get(cluster, ())[:LABEL_TERMS], f"Region {position + 1}", taken
         )
         labelled.append(
             ClusterLabel(
@@ -276,6 +572,7 @@ def label_partition(
                 label=label,
                 terms=evidence.get(cluster, ()),
                 size=int(counts[cluster]),
+                summary=_build_summary(evidence.get(cluster, ()), int(counts[cluster])),
             )
         )
         mapping[int(cluster)] = position
@@ -292,16 +589,14 @@ def label_partition(
 
 def discover_regimes(
     coords: NDArray[np.float64],
-    vocabulary: Any,
+    papers: list[dict[str, Any]],
     discovery_k: int = DEFAULT_DISCOVERY_K,
     reference_k: int = DEFAULT_REFERENCE_K,
 ) -> DiscoveredRegimes:
     """Partition the chart at both resolutions and name every region.
 
-    ``vocabulary`` is a ``src.report.Vocabulary``: whole-word families and their
-    per-document L2 shares.  Names must come from words, not from the n-gram
-    features that build the representation, or a region ends up called
-    ``obotwin``.
+    ``papers`` supply the titles and abstracts the regions are named from, in
+    corpus order: document ``i`` of ``papers`` is document ``i`` of ``coords``.
     """
     LOGGER.info(
         "Discovering regimes from the chart: Discovery K=%d, Reference K=%d",
@@ -311,8 +606,8 @@ def discover_regimes(
     discovery_raw = cluster_on_chart(coords, discovery_k)
     reference_raw = cluster_on_chart(coords, reference_k)
 
-    discovery, discovery_map = label_partition(vocabulary, discovery_raw, discovery_k)
-    reference, reference_map = label_partition(vocabulary, reference_raw, reference_k)
+    discovery, discovery_map = label_partition(papers, discovery_raw, discovery_k)
+    reference, reference_map = label_partition(papers, reference_raw, reference_k)
 
     document_ids = np.array(
         [discovery_map[int(value)] for value in discovery_raw], dtype=np.int64
@@ -364,6 +659,7 @@ def apply_to_papers(
         paper["regime_label"] = str(region.label)
         paper["regime_name"] = str(region.label)
         paper["regime_keywords"] = list(region.terms)
+        paper["regime_summary"] = str(region.summary)
         paper["reference_region_id"] = int(reference_identifier)
         paper["reference_region_label"] = str(
             reference_by_id[reference_identifier].label
@@ -397,7 +693,5 @@ def load_artifact(path: Path) -> dict[str, Any]:
 
 def summarise(discovered: DiscoveredRegimes) -> str:
     """One-line summary used in logs and the runbook."""
-    parts = [
-        f"{entry.label} ({entry.size})" for entry in discovered.discovery
-    ]
+    parts = [f"{entry.label} ({entry.size})" for entry in discovered.discovery]
     return f"K={discovered.discovery_k}: " + ", ".join(parts)

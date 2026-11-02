@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from typing import NamedTuple
 
 import numpy as np
 import pytest
@@ -21,6 +20,8 @@ from src.harvest import _config_path, main
 from src.regimes import (
     MAX_LABEL_CHARS,
     DiscoveredRegimes,
+    _is_fragment,
+    _phrase_key,
     apply_to_papers,
     cluster_on_chart,
     cluster_terms,
@@ -44,34 +45,46 @@ def _two_blob_coords(n: int = 60, seed: int = 0) -> np.ndarray:
     return np.vstack([left, right])
 
 
-class _Vocabulary(NamedTuple):
-    """Stand-in for ``src.report.Vocabulary`` in these tests.
+#: Boilerplate that appears in every synthetic abstract.  A labeller that lets any
+#: of this into a region name has failed, whatever else it gets right.
+_GENERIC = (
+    "We propose a novel method and present extensive experimental results. "
+    "Our approach achieves state of the art performance on several tasks, "
+    "and we additionally provide a comprehensive comparison."
+)
 
-    ``src.regimes`` only reads ``.terms``, ``.l2`` and ``.usable``, so a real
-    ``Vocabulary`` (which needs a full ``Representation``) is more machinery than
-    naming needs.
+
+def _papers(
+    group_titles: tuple[str, ...],
+    rows_per_group: int = 6,
+    *,
+    off_topic: int = 2,
+) -> list[dict]:
+    """Papers whose titles carry one group's topic, plus a little noise.
+
+    ``off_topic`` documents per group say nothing characteristic, which is what a
+    real cluster looks like: no region is unanimous, so a floor of two or three
+    documents is what keeps a single stray phrase out of the name.
     """
+    papers: list[dict] = []
+    for index, topic in enumerate(group_titles):
+        for row in range(rows_per_group):
+            title = topic if row < rows_per_group - off_topic else "A study of things"
+            papers.append(
+                {
+                    "id": f"doc{index}-{row}",
+                    "title": title,
+                    "abstract": f"{_GENERIC} Unrelated text about {index} and {row}.",
+                }
+            )
+    return papers
 
-    terms: NDArray[np.str_]
-    l2: NDArray[np.float64]
-    usable: NDArray[np.bool_]
 
-
-def _vocabulary(
-    rows_per_group: int = 4,
-) -> tuple[_Vocabulary, NDArray[np.int64]]:
-    """A vocabulary where term 0 is global, terms 1 and 2 are group-specific."""
-    terms = np.array(["dataset", "grasping", "legged", "filler", "x1y"])
-    rows: list[list[float]] = []
-    labels: list[int] = []
-    for _ in range(rows_per_group):
-        rows.append([1.0, 0.9, 0.0, 1.0, 0.5])
-        labels.append(0)
-    for _ in range(rows_per_group):
-        rows.append([1.0, 0.0, 0.9, 1.0, 0.5])
-        labels.append(1)
-    usable = np.array([True, True, True, False, True])
-    return _Vocabulary(terms=terms, l2=np.array(rows), usable=usable), np.array(labels)
+def _labels(groups: list[int], rows_per_group: int = 6) -> NDArray[np.int64]:
+    return np.array(
+        [group for group, size in enumerate(groups) for _ in range(size)],
+        dtype=np.int64,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -108,74 +121,142 @@ def test_cluster_on_chart_rejects_k_at_least_n() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_cluster_terms_prefers_enrichment_over_raw_frequency() -> None:
-    vocabulary, labels = _vocabulary()
-    found = cluster_terms(vocabulary, labels, 2)
-    # "dataset" is in every document, so it is frequent but not characteristic.
-    assert "dataset" not in found[0]
-    assert found[0][0] == "grasping"
-    assert found[1][0] == "legged"
+def test_cluster_terms_names_a_region_from_its_own_words() -> None:
+    papers = _papers(
+        (
+            "Dexterous grasping with tactile sensing",
+            "Legged locomotion over rough terrain",
+        )
+    )
+    found = cluster_terms(papers, _labels([6, 6]), 2)
+    assert "grasping" in " ".join(found[0])
+    assert "locomotion" in " ".join(found[1])
 
 
-def test_cluster_terms_drops_prose_filler_and_non_words() -> None:
-    vocabulary, labels = _vocabulary()
-    flat = cluster_terms(vocabulary, labels, 2)
-    used = {term for group in flat.values() for term in group}
-    # "x1y" is not alphabetic and "filler" is not marked usable by the report's
-    # prose filter, so neither may name a region.
-    assert "x1y" not in used
-    assert "filler" not in used
+def test_cluster_terms_ignores_abstract_boilerplate() -> None:
+    """A region called ``propose · novel · extensive`` names nothing.
+
+    Every abstract opens the same way, so boilerplate is the highest-frequency
+    material in the corpus.  Frequency alone would put it first.
+    """
+    papers = _papers(
+        (
+            "Dexterous grasping with tactile sensing",
+            "Legged locomotion over rough terrain",
+        )
+    )
+    found = cluster_terms(papers, _labels([6, 6]), 2)
+    used = {term for group in found.values() for term in group}
+    for word in ("propose", "novel", "extensive", "comprehensive", "approach"):
+        assert not any(word in term for term in used), word
 
 
-def test_cluster_terms_returns_empty_tuple_for_empty_cluster() -> None:
-    vocabulary, _ = _vocabulary()
-    labels = np.array([0] * 8)
-    found = cluster_terms(vocabulary, labels, 2)
+def test_cluster_terms_never_returns_a_phrase_broken_by_a_stopword() -> None:
+    """``tactile sensing dexterous`` is not a phrase any paper wrote.
+
+    Stopwords are rejected after n-grams are built, never removed beforehand: if
+    they were removed first, ``grasping with tactile`` would collapse into
+    ``grasping tactile`` and the label would read as words in an order the text
+    never used.
+    """
+    papers = _papers(
+        (
+            "Dexterous grasping with tactile sensing",
+            "Legged locomotion over rough terrain",
+        )
+    )
+    found = cluster_terms(papers, _labels([6, 6]), 2)
+    for group in found.values():
+        for term in group:
+            words = term.split()
+            if len(words) > 1:
+                # A surviving multi-word phrase must be contiguous text: none of
+                # its interior words may be one the filter refused.
+                assert term in " ".join(str(p["title"]) for p in papers).lower()
+
+
+def test_cluster_terms_returns_empty_tuple_for_an_empty_cluster() -> None:
+    papers = _papers(("Dexterous grasping with tactile sensing",) * 2)
+    found = cluster_terms(papers, np.array([0] * 12), 2)
     assert found[1] == ()
 
 
-def test_label_partition_orders_by_size_and_maps_consistently() -> None:
-    # Cluster 1 is deliberately the larger one, so a mapping that just echoed the
-    # KMeans ids would order the regions wrongly.
-    terms = np.array(["dataset", "grasping", "legged", "filler", "x1y"])
-    usable = np.array([True, True, True, True, True])
-    smaller = [[1.0, 0.9, 0.0, 1.0, 0.5]] * 6
-    larger = [[1.0, 0.0, 0.9, 1.0, 0.5]] * 8
-    vocabulary = _Vocabulary(
-        terms=terms, l2=np.array(smaller + larger), usable=usable
+def test_cluster_terms_rejects_a_length_mismatch() -> None:
+    papers = _papers(("Dexterous grasping with tactile sensing",))
+    with pytest.raises(SystemExit, match="Naming received"):
+        cluster_terms(papers, np.array([0, 1]), 2)
+
+
+def test_label_partition_orders_regions_by_size() -> None:
+    """Cluster 1 is the larger one, so echoing the KMeans id would order wrongly."""
+    papers = _papers(
+        (
+            "Dexterous grasping with tactile sensing",
+            "Legged locomotion over rough terrain",
+        )
     )
-    labels = np.array([0] * 6 + [1] * 8)
-
-    regions, mapping = label_partition(vocabulary, labels, 2)
-
-    assert [region.size for region in regions] == [8, 6]
+    labels = np.array([0] * 4 + [1] * 8)
+    regions, mapping = label_partition(papers, labels, 2)
+    assert [region.size for region in regions] == [8, 4]
     assert [region.cluster for region in regions] == [0, 1]
     assert mapping[1] == 0
     assert mapping[0] == 1
 
 
 def test_label_partition_makes_duplicate_labels_unique() -> None:
-    # Two identical groups produce identical evidence terms, so the second label
-    # must be suffixed rather than collide.
-    terms = np.array(["dataset", "grasping", "legged", "filler", "x1y"])
-    usable = np.array([True, True, True, True, True])
-    rows = np.array([[1.0, 0.9, 0.0, 1.0, 0.5]] * 6)
-    vocabulary = _Vocabulary(terms=terms, l2=rows, usable=usable)
-    labels = np.array([0, 0, 0, 1, 1, 1])
-    regions, _ = label_partition(vocabulary, labels, 2)
+    """Two identical groups yield identical evidence, so the second must differ."""
+    papers = _papers(
+        (
+            "Dexterous grasping with tactile sensing",
+            "Dexterous grasping with tactile sensing",
+        )
+    )
+    regions, _ = label_partition(papers[:6], np.array([0, 0, 0, 1, 1, 1]), 2)
     names = [region.label for region in regions]
     assert len(names) == len(set(names))
 
 
+def test_label_partition_does_not_repeat_a_phrase_across_regions() -> None:
+    """Three chips reading ``zero-shot something`` is what a legend must avoid."""
+    papers = _papers(
+        ("Zero-shot reinforcement learning", "Zero-shot transfer learning")
+    )
+    regions, _ = label_partition(papers, np.array([0] * 6 + [1] * 6), 2)
+    first = set(" ".join(regions[0].terms).split())
+    second = set(" ".join(regions[1].terms).split())
+    assert not (first & second)
+
+
+def test_label_partition_still_names_a_region_it_cannot_distinguish() -> None:
+    papers = _papers(
+        (
+            "Dexterous grasping with tactile sensing",
+            "Dexterous grasping with tactile sensing",
+        )
+    )
+    regions, _ = label_partition(papers, np.array([0] * 6 + [1] * 6), 2)
+    assert all(region.label for region in regions)
+
+
 def test_label_length_is_capped() -> None:
-    long_terms = np.array([f"word{chr(97 + index)}" for index in range(40)])
-    usable = np.ones(long_terms.size, dtype=np.bool_)
-    rows = np.ones((4, long_terms.size))
-    rows[2:, :] = 0.0
-    vocabulary = _Vocabulary(terms=long_terms, l2=rows, usable=usable)
-    regions, _ = label_partition(vocabulary, np.array([0, 0, 0, 1]), 2)
+    filled = _papers(("Deep reinforcement learning for legged locomotion control",) * 2)
+    regions, _ = label_partition(filled, np.array([0] * 6 + [1] * 6), 2)
     for region in regions:
         assert len(region.label) <= MAX_LABEL_CHARS
+
+
+def test_phrase_key_merges_inflections() -> None:
+    """Singular, plural and inflected forms must count as one idea."""
+    assert _phrase_key("generalization") == _phrase_key("generalizations")
+    assert _phrase_key("generalization") & _phrase_key("generalize")
+
+
+def test_is_fragment_recognises_a_cut_out_phrase() -> None:
+    """``learning zero-shot`` is what is left when ``for`` is stripped out."""
+    assert _is_fragment("learning zero-shot")
+    assert _is_fragment("manipulation improving")
+    assert not _is_fragment("successor measures")
+    assert not _is_fragment("transfer")
 
 
 # --------------------------------------------------------------------------- #
@@ -185,8 +266,14 @@ def test_label_length_is_capped() -> None:
 
 def test_discover_regimes_labels_every_document() -> None:
     coords = _two_blob_coords(80, seed=3)
-    vocabulary, _ = _vocabulary(rows_per_group=40)
-    discovered = discover_regimes(coords, vocabulary, discovery_k=2, reference_k=4)
+    papers = _papers(
+        (
+            "Dexterous grasping with tactile sensing",
+            "Legged locomotion over rough terrain",
+        ),
+        rows_per_group=40,
+    )
+    discovered = discover_regimes(coords, papers, discovery_k=2, reference_k=4)
 
     assert discovered.discovery_k == 2
     assert discovered.reference_k == 4
@@ -201,8 +288,14 @@ def test_discover_regimes_labels_every_document() -> None:
 
 def test_discovered_regimes_metadata_round_trip(tmp_path) -> None:
     coords = _two_blob_coords(40, seed=1)
-    vocabulary, _ = _vocabulary(rows_per_group=20)
-    discovered = discover_regimes(coords, vocabulary, discovery_k=2, reference_k=4)
+    papers = _papers(
+        (
+            "Dexterous grasping with tactile sensing",
+            "Legged locomotion over rough terrain",
+        ),
+        rows_per_group=20,
+    )
+    discovered = discover_regimes(coords, papers, discovery_k=2, reference_k=4)
 
     path = tmp_path / "regimes_auto.json"
     write_artifact(path, discovered, query='abs:"robot manipulation"')
@@ -240,21 +333,56 @@ def test_summarise_lists_every_discovery_region() -> None:
 
 def test_apply_to_papers_stamps_labels_from_regions() -> None:
     coords = _two_blob_coords(40, seed=5)
-    vocabulary, _ = _vocabulary(rows_per_group=20)
-    discovered = discover_regimes(coords, vocabulary, discovery_k=2, reference_k=4)
-    papers = [
-        {"id": f"doc{i}", "regime_id": 0, "regime_label": "Field"}
-        for i in range(40)
+    papers = _papers(
+        (
+            "Dexterous grasping with tactile sensing",
+            "Legged locomotion over rough terrain",
+        ),
+        rows_per_group=20,
+    )
+    discovered = discover_regimes(coords, papers, discovery_k=2, reference_k=4)
+    records = [
+        {"id": f"doc{i}", "regime_id": 0, "regime_label": "Field"} for i in range(40)
     ]
 
-    apply_to_papers(papers, discovered)
+    apply_to_papers(records, discovered)
 
     by_region = {region.cluster: region for region in discovered.discovery}
-    for paper, region_id in zip(papers, discovered.document_ids, strict=True):
-        assert paper["regime_id"] == region_id
-        assert paper["regime_label"] == by_region[region_id].label
-        assert paper["regime_keywords"] == list(by_region[region_id].terms)
-    assert len({paper["regime_label"] for paper in papers}) == 2
+    for record, region_id in zip(records, discovered.document_ids, strict=True):
+        assert record["regime_id"] == region_id
+        assert record["regime_label"] == by_region[region_id].label
+        assert record["regime_keywords"] == list(by_region[region_id].terms)
+    assert len({record["regime_label"] for record in records}) == 2
+
+
+def test_every_region_carries_a_readable_summary() -> None:
+    """A chip names a region; the summary says what it is about.
+
+    ``successor measures · reward functions`` is a label, not an explanation, and
+    the dashboard has nowhere to put a sentence except a hover title.
+    """
+    papers = _papers(
+        (
+            "Dexterous grasping with tactile sensing",
+            "Legged locomotion over rough terrain",
+        )
+    )
+    regions, _ = label_partition(papers, np.array([0] * 6 + [1] * 6), 2)
+    for region in regions:
+        assert region.summary
+        assert region.summary.startswith(f"{region.size} papers centred on")
+        # The summary must keep more evidence than the two-phrase label, or it
+        # adds nothing a reader could not already see in the chip.
+        for term in region.terms[:2]:
+            assert term in region.summary
+
+
+def test_a_region_without_evidence_still_gets_a_summary() -> None:
+    """One document has no phrase distinctive enough to name it."""
+    papers = _papers(("Dexterous grasping with tactile sensing",))
+    regions, _ = label_partition(papers, np.array([0] * 5 + [1]), 2)
+    lonely = next(region for region in regions if region.size == 1)
+    assert lonely.summary == "1 paper with no distinguishing vocabulary of its own."
 
 
 def test_apply_to_papers_rejects_a_length_mismatch() -> None:

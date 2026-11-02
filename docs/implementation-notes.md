@@ -446,11 +446,30 @@ exists. Detection happens where the information actually is:
   automatically; had they read `config.yaml::regimes`, the single placeholder
   query would have coloured the entire map one hue.
 
-Regions are drawn from the chart because a legend must describable by pointing
-at the picture. Naming them uses TF-IDF *enrichment* (cluster mean over corpus
-mean), not raw mass: a word that is everywhere scores 1.0 and names nothing, so
-a 1.05 floor keeps the third label slot from filling with a generic word.
-`P_boundary` is untouched — it was never a function of the regime labels.
+Regions are drawn from the chart because a legend must be describable by
+pointing at the picture. Naming them is c-TF-IDF over each cluster's **titles
+and abstracts** — the cluster's count of a phrase times how much rarer that
+phrase is corpus-wide — not raw mass: a word that is everywhere names nothing,
+so an enrichment floor keeps the second label slot from filling with a generic
+word. `P_boundary` is untouched; it was never a function of the regime labels.
+
+**Three attempts were needed to get names a reader can use.** The first drew
+labels from `Representation.terms`, which are character n-grams, and produced
+`robotw · obotwin · robotwi`. The second drew them from the `Vocabulary` built
+over extracted full text, and produced `cpus · linxi · sax` and
+`diacttod · rlaif · mokady` — author surnames and artefacts of the PDF layout,
+because a name repeated in one cited subsection outscored every real topic
+phrase in that region. The third, kept, reads titles and abstracts only.
+
+Two smaller traps in the same code. Stopwords are rejected **after** n-grams are
+built, never removed before: `CountVectorizer(stop_words=...)` filters the token
+stream first, which glues the survivors together and yields
+`tactile sensing dexterous` out of `dexterous grasping with tactile sensing` — a
+phrase no paper wrote. And cross-region phrase de-duplication is needed because
+"zero-shot" heads four different regions: without it three chips read
+`zero-shot …` and the legend stops distinguishing anything. Dedupe is a
+two-pass preference, not a hard filter — a region that has nothing unclaimed
+still gets a name rather than falling back to `Region 4`.
 
 Both profiles resolve artifacts through the same relative paths, anchored at
 the config file. Harvest used to resolve them against the working directory,

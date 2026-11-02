@@ -199,6 +199,10 @@
     gap: 4px 10px; font-size: 9.5px; color: var(--muted);
   }
   .legend-item { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  /* ``display: contents`` promotes the regime chips into the legend's own flex
+     row.  As an inline span they stacked one per line once the labels became
+     phrases instead of single words, which cost five rows of map height. */
+  #regime-legend { display: contents; }
   .legend-sep { width: 1px; height: 12px; background: rgba(255, 255, 255, 0.10); }
   .diamond-glyph {
     width: 8px;
@@ -218,6 +222,20 @@
     background: rgba(8, 11, 18, 0.72); backdrop-filter: blur(4px);
     font-family: var(--mono); font-size: 9.5px; color: var(--muted);
   }
+  /* Plotly floats its modebar over the top-right corner of the plot, which is
+     exactly where the regime legend sits, so hovering the map hid the legend
+     behind the zoom buttons.  Plotly has no config for this position; the
+     container is positioned in the stylesheet, so it is moved here.  The badge
+     above keeps the right corner and this takes the left. */
+  .map-stage .modebar-container {
+    right: auto !important;
+    left: 10px !important;
+    top: 8px !important;
+  }
+  /* Plotly writes ``left: <container width - 170>px`` inline on the bar itself,
+     so this one needs ``!important`` to win; without it the inline value keeps
+     the buttons on the right however the container is moved. */
+  .map-stage .modebar { left: 2px !important; right: auto !important; }
 
   /* ── drawer chrome ──────────────────────────────────────────────────── */
   .drawer-bar {
@@ -715,7 +733,12 @@ DATA.regimes.forEach(function (regime) { REGIME_COLOR[regime.label] = regime.col
 DATA.regimes.forEach(function (regime) {
   const legendHost = document.getElementById("regime-legend");
   if (!legendHost) return;
-  append(legendHost, el("span", { class: "legend-item" }, [
+  /* Two phrases name a region but do not explain it, and there is no room in a
+     chip row for a sentence: the summary rides on the title attribute, which the
+     browser shows on hover.  ``title`` on the wrapper covers the dot and the
+     text, so the pointer does not have to find the exact glyph. */
+  const hud = regime.summary || (regime.name && regime.name !== regime.label ? regime.name : "");
+  append(legendHost, el("span", { class: "legend-item", title: hud }, [
     el("span", { class: "chip-dot", style: { background: regime.color } }),
     el("span", { text: regime.label })
   ]));

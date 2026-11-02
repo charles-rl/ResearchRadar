@@ -1,0 +1,185 @@
+{
+  "generated_by": "src.regimes (auto-discovered taxonomy)",
+  "citation": "Obayashi et al. (2026) Knowledge Manifold Optimization, Sec. 3.2 (K as a resolution on one hierarchy)",
+  "discovery_k": 5,
+  "reference_k": 8,
+  "discovery": [
+    {
+      "cluster": 0,
+      "label": "zero-shot sim-to-real transfer · success rate",
+      "terms": [
+        "zero-shot sim-to-real transfer",
+        "success rate",
+        "visual navigation",
+        "deep reinforcement",
+        "generalization unseen"
+      ],
+      "size": 25,
+      "summary": "25 papers centred on zero-shot sim-to-real transfer, success rate, visual navigation, deep reinforcement and generalization unseen."
+    },
+    {
+      "cluster": 1,
+      "label": "successor measures · forward-backward representatio…",
+      "terms": [
+        "successor measures",
+        "forward-backward representations",
+        "test time",
+        "offline",
+        "linear"
+      ],
+      "size": 22,
+      "summary": "22 papers centred on successor measures, forward-backward representations, test time, offline and linear."
+    },
+    {
+      "cluster": 2,
+      "label": "language models · reward",
+      "terms": [
+        "language models",
+        "reward",
+        "reasoning",
+        "action",
+        "prediction"
+      ],
+      "size": 19,
+      "summary": "19 papers centred on language models, reward, reasoning, action and prediction."
+    },
+    {
+      "cluster": 3,
+      "label": "llms · capabilities",
+      "terms": [
+        "llms",
+        "capabilities",
+        "test-time",
+        "scenarios",
+        "coordination"
+      ],
+      "size": 19,
+      "summary": "19 papers centred on llms, capabilities, test-time, scenarios and coordination."
+    },
+    {
+      "cluster": 4,
+      "label": "control · planning",
+      "terms": [
+        "control",
+        "planning",
+        "autonomous",
+        "safety",
+        "optimal"
+      ],
+      "size": 15,
+      "summary": "15 papers centred on control, planning, autonomous, safety and optimal."
+    }
+  ],
+  "reference": [
+    {
+      "cluster": 0,
+      "label": "reward function · unsupervised",
+      "terms": [
+        "reward function",
+        "unsupervised",
+        "successor",
+        "goal",
+        "pre-training"
+      ],
+      "size": 15,
+      "summary": "15 papers centred on reward function, unsupervised, successor, goal and pre-training."
+    },
+    {
+      "cluster": 1,
+      "label": "zero-shot transfer · humanoid",
+      "terms": [
+        "zero-shot transfer",
+        "humanoid",
+        "control",
+        "real-world",
+        "generalization"
+      ],
+      "size": 13,
+      "summary": "13 papers centred on zero-shot transfer, humanoid, control, real-world and generalization."
+    },
+    {
+      "cluster": 2,
+      "label": "representations · actions",
+      "terms": [
+        "representations",
+        "actions",
+        "offline",
+        "agents",
+        "unseen"
+      ],
+      "size": 13,
+      "summary": "13 papers centred on representations, actions, offline, agents and unseen."
+    },
+    {
+      "cluster": 3,
+      "label": "image · prediction",
+      "terms": [
+        "image",
+        "prediction",
+        "optimization",
+        "clip",
+        "text"
+      ],
+      "size": 13,
+      "summary": "13 papers centred on image, prediction, optimization, clip and text."
+    },
+    {
+      "cluster": 4,
+      "label": "success rate · sim-to-real",
+      "terms": [
+        "success rate",
+        "sim-to-real",
+        "simulation",
+        "manipulation",
+        "visual"
+      ],
+      "size": 12,
+      "summary": "12 papers centred on success rate, sim-to-real, simulation, manipulation and visual."
+    },
+    {
+      "cluster": 5,
+      "label": "test time · optimal",
+      "terms": [
+        "test time",
+        "optimal",
+        "downstream",
+        "behavior",
+        "value"
+      ],
+      "size": 12,
+      "summary": "12 papers centred on test time, optimal, downstream, behavior and value."
+    },
+    {
+      "cluster": 6,
+      "label": "navigation · physical",
+      "terms": [
+        "navigation",
+        "physical",
+        "exploration",
+        "foundation",
+        "llms"
+      ],
+      "size": 12,
+      "summary": "12 papers centred on navigation, physical, exploration, foundation and llms."
+    },
+    {
+      "cluster": 7,
+      "label": "language models · reasoning",
+      "terms": [
+        "language models",
+        "reasoning",
+        "explicit",
+        "test-time",
+        "accuracy"
+      ],
+      "size": 10,
+      "summary": "10 papers centred on language models, reasoning, explicit, test-time and accuracy."
+    }
+  ],
+  "assignment": {
+    "space": "chart coordinates [-1, 1]^2",
+    "why_not_semantic": "colour regions must be contiguous to be readable; the Eq. 21 boundary views stay in TF-IDF space, unchanged",
+    "labelling": "c-TF-IDF over each region's titles and abstracts: the cluster's term counts weighted by how much rarer the term is across the corpus, keeping only phrases found in at least 3 documents of the cluster and 1.5x denser here than corpus-wide"
+  },
+  "query": "(abs:\"zero-shot\" OR abs:\"zero shot\") AND abs:\"reinforcement learning\""
+}

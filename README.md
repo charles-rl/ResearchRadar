@@ -25,11 +25,12 @@ checks whatever an LLM returns for that prompt).
 | `profile` | Corpus | Regimes |
 | --- | --- | --- |
 | `seed_first` (default) | your PDFs in `docs/papers/desired/` plus a per-regime harvest | declared in `config.yaml::regimes` |
-| `single_field` | one broad query harvested to `single_field.target_total_papers`, no seeds | discovered after projection and named from their own TF-IDF terms |
+| `single_field` | one broad query harvested to `single_field.target_total_papers`, no seeds | discovered after projection, named from each cluster's titles and abstracts |
 
 In `single_field` (Zero-Seed) mode the regimes below are not used: `src.manifold`
 clusters the finished chart at Discovery K=5 and Reference K=8 (paper Sec. 3.2),
-names each region from the terms that are over-represented inside it, and writes
+names each region from the phrases that over-represent it inside its own titles
+and abstracts (full text would name a region after a cited author), and writes
 those names into the corpus, so `src.pareto`, `src.report`, and the dashboard all
 pick them up without knowing the mode exists. `P_boundary` is unchanged in both
 modes — it is the harmonic mean over `k5_global`, `k8_global`, and `k8_adaptive`

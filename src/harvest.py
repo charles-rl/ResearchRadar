@@ -2507,8 +2507,7 @@ def build_fulltext_corpus(
         seeds = []
         seed_failures = []
         LOGGER.info(
-            "Step 1/5: Zero-Seed Mode, no seeding papers (single query, "
-            "%d documents)",
+            "Step 1/5: Zero-Seed Mode, no seeding papers (single query, %d documents)",
             target_total,
         )
     else:
@@ -2667,7 +2666,9 @@ def build_fulltext_corpus(
         "metadata": {
             **metadata,
             "generated_by": (
-                "src.harvest (Single-Field)" if single_field else "src.harvest (Seed-First)"
+                "src.harvest (Single-Field)"
+                if single_field
+                else "src.harvest (Seed-First)"
             ),
         },
         "papers": [
@@ -2763,7 +2764,10 @@ def refresh_fulltext_from_cache(
         paper["full_text"] = result.text
         paper["extraction"] = {
             "source": raw_source,
-            "attempts": [*(paper.get("extraction", {}).get("attempts") or []), "refresh"],
+            "attempts": [
+                *(paper.get("extraction", {}).get("attempts") or []),
+                "refresh",
+            ],
             **quality.as_dict(),
         }
         paper["sanitation"] = result.as_dict()
@@ -2795,9 +2799,9 @@ def refresh_fulltext_from_cache(
     )
     if corpus_path.is_file():
         corpus_payload = load_corpus(corpus_path)
-        corpus_payload.setdefault("metadata", {})["text_fingerprint"] = (
-            metadata["text_fingerprint"]
-        )
+        corpus_payload.setdefault("metadata", {})["text_fingerprint"] = metadata[
+            "text_fingerprint"
+        ]
         corpus_payload["metadata"]["fulltext_cache"] = metadata["fulltext_cache"]
         write_corpus(corpus_payload, corpus_path)
 
@@ -2998,9 +3002,7 @@ def main(argv: list[str] | None = None) -> int:
     out_path = (
         Path(args.out)
         if args.out
-        else _config_path(
-            config_dir, corpus_cfg.get("output_path"), "data/corpus.json"
-        )
+        else _config_path(config_dir, corpus_cfg.get("output_path"), "data/corpus.json")
     )
     target_per_regime = int(corpus_cfg.get("target_per_regime", 35))
     target_total = int(corpus_cfg.get("target_total_papers", 120))

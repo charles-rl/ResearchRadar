@@ -170,8 +170,8 @@ supply **one broad query** and the pipeline discovers the structure itself.
 
 Nothing about the downstream maths changes. `src.harvest` writes a corpus with
 no seeds; `src.manifold` then clusters the finished chart into Discovery K=5
-and Reference K=8, names every region from its own top TF-IDF terms, and writes
-those names **into the corpus**. From `src.pareto` onward the pipeline cannot
+and Reference K=8, names every region from its own titles and abstracts, and
+writes those names **into the corpus**. From `src.pareto` onward the pipeline cannot
 tell the two modes apart, because it reads labels off the papers rather than
 out of `config.yaml`.
 
@@ -237,16 +237,22 @@ understands: `seed_count: 0`, one placeholder regime, and a lookback of
 | Corpus size | `seed_count + n_regimes × target_per_regime` | `target_total_papers` |
 | Recency window | `min(seed_years) - seed_year_offset`, clamped | fixed `years_back` |
 | Regime ids | from `config.yaml::regimes`, pinned per seed | discovered after projection |
-| Region names | written by you | top TF-IDF terms per cluster |
+| Region names | written by you | c-TF-IDF over each cluster's titles + abstracts |
 | `docs/papers/` | required | ignored |
 | `P_boundary` | unchanged — harmonic mean of `k5_global`, `k8_global`, `k8_adaptive` | unchanged |
 
-Regions are drawn from the **2D chart**, so each one is a contiguous patch;
-naming them uses TF-IDF enrichment *within* each cluster (mean share in the
-cluster versus the corpus, floored at 2 documents and 10% of the cluster). A
-region whose candidates are all prose filler falls back to `Region N`. If the
-labels read like noise, the field is probably too heterogeneous for one query —
-narrow it rather than raising `discovery_k`.
+Regions are drawn from the **2D chart**, so each one is a contiguous patch.
+Naming them is c-TF-IDF over each cluster's **titles and abstracts**: phrases
+that are frequent inside the region and rare outside it, kept only if they occur
+in at least 3 documents and 10% of it, and rejected if they contain a stopword
+(so every label is a phrase some paper actually wrote). Two phrases become the
+legend chip; five become the hover sentence. A region with no distinctive
+vocabulary of its own falls back to `Region N`.
+
+Titles and abstracts are used deliberately, not the corpus full text: full text
+is dominated by repeated surnames and table headers, so a region ends up called
+`cpus · linxi`. If the labels still read like noise, the field is probably too
+heterogeneous for one query — narrow it rather than raising `discovery_k`.
 
 ### Pitfalls
 

@@ -274,12 +274,26 @@ def build_payload(
         str(regime.get("label")): regime for regime in config.get("regimes", [])
     }
     colours = dashboard_palette(corpus_labels)
+    # A region's readable summary is a property of the region, repeated on every
+    # paper that belongs to it, so one paper is enough to recover it.  Keeping it
+    # out of the payload would leave the legend as two bare phrases and leave the
+    # reader to guess what ``successor measures`` means.
+    summaries: dict[str, str] = {}
+    sizes: dict[str, int] = {}
+    for paper in corpus["papers"]:
+        label = str(paper.get("regime_label", ""))
+        sizes[label] = sizes.get(label, 0) + 1
+        summary = str(paper.get("regime_summary", ""))
+        if summary and label not in summaries:
+            summaries[label] = summary
     regimes = [
         {
             "id": position,
             "label": label,
             "name": str(by_label.get(label, {}).get("name", label)),
             "color": colours.get(label, "#94a3b8"),
+            "summary": summaries.get(label, ""),
+            "size": sizes.get(label, 0),
         }
         for position, label in enumerate(corpus_labels)
     ]

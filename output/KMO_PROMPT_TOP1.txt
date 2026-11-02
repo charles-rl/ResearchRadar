@@ -1,7 +1,7 @@
 You are participating in a controlled experiment.  A deterministic 
 pipeline has analyzed a corpus of papers and exported a machine-computed 
 **evidence package** for one location on its knowledge map — the attached 
-`evidence_point_+0.20_-0.80.json`, as produced by `code/make_evidence.py`. 
+`evidence_point_+0.40_+0.80.json`, as produced by `code/make_evidence.py`. 
 No real paper occupies that location.  Your task is to write the 
 **virtual document**: a description of the research that *would* occupy 
 it. 
@@ -56,17 +56,17 @@ Deliverables
 Output Task A, then Task B, then the `Evidence used:` list.  Do not 
 include anything else — no reasoning trace, no extra sections. 
 
---- attached: evidence_point_+0.20_-0.80.json ---
+--- attached: evidence_point_+0.40_+0.80.json ---
 {
   "location": {
-    "x": 0.2,
-    "y": -0.8
+    "x": 0.4,
+    "y": 0.8
   },
   "theme_lens_L2": [
     {
       "term": "representation",
-      "weight": 0.52035,
-      "df": 113,
+      "weight": 0.49634,
+      "df": 95,
       "word_forms": [
         "represent",
         "representation",
@@ -79,93 +79,90 @@ include anything else — no reasoning trace, no extra sections.
     },
     {
       "term": "representation-learning",
-      "weight": 0.47208,
-      "df": 4,
+      "weight": 0.46944,
+      "df": 2,
       "word_forms": [
         "representation-learning"
       ]
     },
     {
-      "term": "state-representation",
-      "weight": 0.41876,
-      "df": 2,
+      "term": "reinforcement-learning",
+      "weight": 0.4489,
+      "df": 3,
       "word_forms": [
-        "state-representation",
-        "state-representations"
+        "reinforcement-learned",
+        "reinforcement-learning"
       ]
     },
     {
-      "term": "optimization",
-      "weight": 0.38903,
-      "df": 111,
+      "term": "reinforcement-learningbased",
+      "weight": 0.44604,
+      "df": 2,
       "word_forms": [
+        "reinforcement-learningbased"
+      ]
+    },
+    {
+      "term": "generalization",
+      "weight": 0.40353,
+      "df": 83,
+      "word_forms": [
+        "generalisation",
+        "generalising",
+        "generality",
+        "generalization",
+        "generalizing"
+      ]
+    },
+    {
+      "term": "optimal",
+      "weight": 0.39025,
+      "df": 87,
+      "word_forms": [
+        "optim",
         "optimal",
         "optimally",
+        "optimisation",
         "optimising",
         "optimization",
         "optimizing"
       ]
     },
     {
-      "term": "computationally-efficient",
-      "weight": 0.37297,
+      "term": "representation-based",
+      "weight": 0.37037,
       "df": 2,
       "word_forms": [
-        "computationally-efficient"
+        "representation-based"
       ]
     },
     {
-      "term": "computed",
-      "weight": 0.34448,
-      "df": 101,
+      "term": "specific",
+      "weight": 0.35532,
+      "df": 93,
       "word_forms": [
-        "computation",
-        "computational",
-        "computations",
-        "compute",
-        "computed",
-        "computer",
-        "computers",
-        "computes",
-        "computing"
+        "specific",
+        "specifically",
+        "specification",
+        "specifications",
+        "specificity",
+        "specifics"
       ]
     },
     {
-      "term": "optimized",
-      "weight": 0.34304,
-      "df": 83,
+      "term": "reward-maximizing",
+      "weight": 0.33784,
+      "df": 4,
       "word_forms": [
-        "optimizations",
-        "optimize",
-        "optimized",
-        "optimizer",
-        "optimizers",
-        "optimizes"
-      ]
-    },
-    {
-      "term": "parameterized",
-      "weight": 0.33426,
-      "df": 59,
-      "word_forms": [
-        "parameterizations",
-        "parameterize",
-        "parameterized",
-        "parameterizes"
-      ]
-    },
-    {
-      "term": "fb-representation",
-      "weight": 0.33109,
-      "df": 2,
-      "word_forms": [
-        "fb-representation"
+        "reward-maximising",
+        "reward-maximization",
+        "reward-maximizing"
       ]
     },
     {
       "term": "transformer",
-      "weight": 0.32941,
-      "df": 42,
+      "weight": 0.3355,
+      "df": 52,
       "word_forms": [
         "transform",
         "transformation",
@@ -178,74 +175,79 @@ include anything else — no reasoning trace, no extra sections.
       ]
     },
     {
-      "term": "generalize",
-      "weight": 0.32401,
-      "df": 78,
+      "term": "maximizing",
+      "weight": 0.32613,
+      "df": 34,
       "word_forms": [
-        "generalizations",
-        "generalize",
-        "generalized",
-        "generalizes"
+        "maximal",
+        "maximally",
+        "maximisation",
+        "maximising",
+        "maximization",
+        "maximizing"
       ]
     },
     {
-      "term": "generalization",
-      "weight": 0.32282,
-      "df": 64,
+      "term": "conditions",
+      "weight": 0.32295,
+      "df": 87,
       "word_forms": [
-        "generalisation",
-        "generalising",
-        "generality",
-        "generalization",
-        "generalizing"
+        "condition",
+        "conditional",
+        "conditionally",
+        "conditioned",
+        "conditioner",
+        "conditioning",
+        "conditions"
       ]
     }
   ],
   "concentration_lens_L1": [],
   "contributing_documents_top3": [
     {
-      "doc": "doc 89",
-      "source": "https://arxiv.org/abs/1807.08037v2",
+      "doc": "doc 39",
+      "source": "https://arxiv.org/abs/2411.19418v2",
       "is_seed": false,
-      "title": "Bipedal Hopping: Reduced-order Model Embedding via Optimization-based Control",
+      "title": "Proto Successor Measure: Representing the Behavior Space of an RL Agent",
       "authors": [
-        "Xiaobin Xiong",
-        "Aaron Ames"
-      ],
-      "year": 2018,
-      "regime": "Legged-Control",
-      "weight": 0.1069
-    },
-    {
-      "doc": "doc 31",
-      "source": "https://arxiv.org/abs/2410.17904v1",
-      "is_seed": false,
-      "title": "Reinforcement Learning under Latent Dynamics: Toward Statistical and Algorithmic Modularity",
-      "authors": [
-        "Philip Amortila",
-        "Dylan J. Foster",
-        "Nan Jiang"
+        "Siddhant Agarwal",
+        "Harshit Sikchi",
+        "Peter Stone"
       ],
       "year": 2024,
-      "regime": "ZeroShot-Rep",
-      "weight": 0.098
+      "regime": "language models · reward",
+      "weight": 0.1328
     },
     {
-      "doc": "doc 4",
-      "source": "https://arxiv.org/abs/2502.12555v1",
-      "is_seed": true,
-      "title": "Warm Starting of CMA-ES for Contextual Optimization Problems",
+      "doc": "doc 15",
+      "source": "https://arxiv.org/abs/2509.18928v1",
+      "is_seed": false,
+      "title": "Direct Preference Optimization for Speech Autoregressive Diffusion Models",
       "authors": [
-        "Yuta Sekino",
-        "Kento Uchida",
-        "Shinichi Shirakawa"
+        "Zhijun Liu",
+        "Dongya Jia",
+        "Xiaoqiang Wang"
       ],
       "year": 2025,
-      "regime": "Legged-Control",
-      "weight": 0.0912
+      "regime": "language models · reward",
+      "weight": 0.1253
+    },
+    {
+      "doc": "doc 42",
+      "source": "https://arxiv.org/abs/2607.21069v1",
+      "is_seed": false,
+      "title": "From Evaluation to Optimisation: Hierarchy-Aware Training Signals for CWE Prediction in Python",
+      "authors": [
+        "Muntasir Adnan",
+        "Manile Srun",
+        "Carlos C. N. Kuhn"
+      ],
+      "year": 2026,
+      "regime": "language models · reward",
+      "weight": 0.1004
     }
   ],
-  "mixture_entropy_H": 0.8265,
-  "effective_contributing_documents": 16.83,
-  "relative_uncertainty_u": 0.003379
+  "mixture_entropy_H": 0.9444,
+  "effective_contributing_documents": 13.59,
+  "relative_uncertainty_u": 0.00752
 }
