@@ -191,8 +191,13 @@ if (!main) {
   const seeds = traces.filter((t) => t.type === "scatter" && t.name === "Seeding papers");
   const totalPapers = papers.reduce((s, t) => s + t.x.length, 0) +
     seeds.reduce((s, t) => s + t.x.length, 0);
-  if (totalPapers !== 120) fail("paper traces cover " + totalPapers + " papers, expected 120");
-  else pass(regimeTraceNames.length + " regime traces + seed trace cover all 120 papers (" +
+  /* The corpus size belongs to the payload, not to this file: a Zero-Seed run
+     has no seeding papers and any corpus change moves the count. */
+  const expectedPapers = DATA.papers.length;
+  if (totalPapers !== expectedPapers)
+    fail("paper traces cover " + totalPapers + " papers, expected " + expectedPapers);
+  else pass(regimeTraceNames.length + " regime traces + seed trace cover all " +
+    expectedPapers + " papers (" +
     papers.map((t) => t.name + ":" + t.x.length).join(" ") + " seeds:" +
     seeds.reduce((s, t) => s + t.x.length, 0) + ")");
 
@@ -204,12 +209,18 @@ if (!main) {
   else pass("regime legend rendered from the payload: " +
     DATA.regimes.map((r) => r.label).join(", "));
 
-  if (seeds.length !== 1) fail("expected one seeding-paper trace, found " + seeds.length);
-  else if (seeds[0].marker.symbol !== "diamond-open")
+  if (seeds.length > 1) fail("expected at most one seeding-paper trace, found " + seeds.length);
+  else if (seeds.length === 0) {
+    if (DATA.papers.some((p) => p.is_seed))
+      fail("payload has seeding papers but no seed trace");
+    else pass("no seeding papers in this corpus (Zero-Seed Mode), no seed trace");
+  } else if (seeds[0].marker.symbol !== "diamond-open")
     fail("seeding papers use marker " + JSON.stringify(seeds[0].marker.symbol) + ", expected diamond-open");
   else pass("seeding papers drawn as hollow diamonds");
   const seededPapers = DATA.papers.filter((p) => p.is_seed);
-  if (seededPapers.length !== seeds[0].x.length)
+  if (seeds.length === 0) {
+    /* already reported above */
+  } else if (seededPapers.length !== seeds[0].x.length)
     fail("seed trace has " + seeds[0].x.length + " points, payload has " + seededPapers.length);
   else pass("seed trace matches the payload's " + seededPapers.length + " seeding papers");
 

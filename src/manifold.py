@@ -59,11 +59,16 @@ from numpy.typing import NDArray
 from src.common import (
     LOGGER,
     Paths,
+    config_int,
     configure_logging,
+    corpus_regime_labels,
+    is_single_field,
     load_config,
     resolve_paths,
+    single_field_settings,
 )
 from src.embed import Representation, load_representation
+from src.regimes import apply_to_papers, discover_regimes, summarise, write_artifact
 
 DEFAULT_CONFIG = Path("config.yaml")
 OBJECTIVE_NAMES = ("P_boundary", "W", "G", "S")
@@ -1133,6 +1138,93 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _persist_discovered_regimes(
+    paths: Paths,
+    config: dict[str, Any],
+    corpus: dict[str, Any],
+    papers: list[dict[str, Any]],
+    discovered: Any,
+) -> None:
+    """Write the discovered taxonomy back to the corpus and to its artifact.
+
+    Two files are written, and both are needed.  ``data/regimes_auto.json`` is the
+    standalone record of what was discovered (both resolutions, their evidence
+    terms, and the query); the corpus rewrite is what the report and the
+    dashboard actually read, because they take a paper's label from the paper.
+    The full-text corpus is rewritten too, from the same labels, so the two
+    corpus files cannot disagree about who belongs to which region.
+    """
+    settings = single_field_settings(config)
+    query = str(settings.get("query", "")) or None
+    artifact_path = paths.grid_npz.parent / "regimes_auto.json"
+    write_artifact(artifact_path, discovered, query=query)
+
+    counts: dict[str, int] = {}
+    for paper in papers:
+        label = str(paper["regime_label"])
+        counts[label] = counts.get(label, 0) + 1
+
+    corpus.setdefault("metadata", {})["regimes_auto"] = discovered.as_metadata(query=query)
+    corpus["metadata"]["regime_counts"] = counts
+    corpus["metadata"]["n_seeds"] = sum(1 for paper in papers if paper.get("is_seed"))
+
+    # corpus.json carries metadata only; corpus_fulltext.json adds the text.  The
+    # text is taken from the existing file so this rewrite never touches it.
+    fulltext_by_id: dict[str, str] = {}
+    if paths.corpus_fulltext.is_file():
+        try:
+            with paths.corpus_fulltext.open("r", encoding="utf-8") as handle:
+                previous = json.load(handle)
+        except (OSError, json.JSONDecodeError) as exc:
+            LOGGER.warning("Cannot read %s to refresh regimes: %s", paths.corpus_fulltext, exc)
+            previous = {}
+        for entry in previous.get("papers", []):
+            text = entry.get("full_text")
+            if isinstance(text, str) and text:
+                fulltext_by_id[str(entry.get("id", ""))] = text
+
+    _write_json(
+        paths.corpus,
+        {
+            # ``generated_by`` already names the build that produced this corpus
+            # (seed-first or single-field); keep it rather than re-stamping it.
+            "metadata": dict(corpus["metadata"]),
+            "papers": [
+                {key: value for key, value in paper.items() if key != "full_text"}
+                for paper in papers
+            ],
+        },
+    )
+
+    fulltext_papers: list[dict[str, Any]] = []
+    for paper in papers:
+        entry = dict(paper)
+        text = fulltext_by_id.get(str(paper.get("id", "")))
+        if text:
+            entry["full_text"] = text
+        fulltext_papers.append(entry)
+    _write_json(
+        paths.corpus_fulltext,
+        {"metadata": dict(corpus["metadata"]), "papers": fulltext_papers},
+    )
+    LOGGER.info(
+        "Rewrote %s and %s with %d discovered regions",
+        paths.corpus,
+        paths.corpus_fulltext,
+        discovered.discovery_k,
+    )
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    """Atomic JSON write, so a crash cannot leave a half-written corpus."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with tmp_path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, ensure_ascii=False)
+        handle.write("\n")
+    tmp_path.replace(path)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
@@ -1171,9 +1263,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     regimes = np.array([int(paper["regime_id"]) for paper in papers], dtype=np.int64)
-    n_regimes = len({int(regime["id"]) for regime in config.get("regimes", [])}) or (
-        int(regimes.max()) + 1
-    )
+    n_regimes = len(corpus_regime_labels(papers)) or (int(regimes.max()) + 1)
 
     LOGGER.info(
         "Building manifold for %d documents across %d domain regimes "
@@ -1182,8 +1272,40 @@ def main(argv: list[str] | None = None) -> int:
         n_regimes,
     )
     manifold = build_manifold(gram_matrix(representation.z_l2), config)
+
+    discovered = None
+    if is_single_field(config):
+        # Zero-Seed Mode: there is no manual taxonomy, so the regions are read off
+        # the chart after projection and named from their own words.  The corpus
+        # is rewritten here because every renderer reads its labels from the
+        # papers; doing it anywhere later would let the chart and the legend
+        # disagree for one stage.
+        #
+        # Naming uses the whole-word vocabulary, not the n-gram features that
+        # build the representation: an n-gram label reads as ``obotwin · priva``,
+        # which names nothing.  Imported here rather than at module scope because
+        # ``src.report`` pulls in the rendering stack this stage does not need.
+        from .report import build_vocabulary
+
+        vocabulary = build_vocabulary(representation)
+        discovered = discover_regimes(
+            coords=manifold.coords,
+            vocabulary=vocabulary,
+            discovery_k=config_int(single_field_settings(config), "discovery_k", 5),
+            reference_k=config_int(single_field_settings(config), "reference_k", 8),
+        )
+        apply_to_papers(papers, discovered)
+        regimes = np.array(
+            [int(paper["regime_id"]) for paper in papers], dtype=np.int64
+        )
+        n_regimes = discovered.discovery_k
+        LOGGER.info("Discovered regimes -> %s", summarise(discovered))
+
     fields = compute_objectives(config, representation, regimes, n_regimes, manifold)
     save_grid(paths, manifold, fields, corpus)
+
+    if discovered is not None:
+        _persist_discovered_regimes(paths, config, corpus, papers, discovered)
 
     return 0 if verify_manifold(paths.grid_npz, len(papers), expected_points) else 1
 

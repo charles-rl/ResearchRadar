@@ -47,12 +47,16 @@ from .common import (
     load_config,
     paper_source_url,
     regime_palette,
+    resolve_asset_path,
     resolve_paths,
 )
 from .embed import Representation, load_representation
 
 DEFAULT_CONFIG = Path("config.yaml")
 PROMPT_TEMPLATE = Path("docs/kmo_prompt_template_A1.txt")
+
+#: ``\uXXXX`` escapes inside the JSON payload that Plotly embeds in the page.
+_JSON_UNICODE_ESCAPE_RE = re.compile(r"\\u([0-9a-fA-F]{4})")
 
 # Hand-curated prose filter. These are words that carry no topical information in
 # an abstract; without it the L1 concentration lens surfaces generic academic
@@ -880,6 +884,14 @@ def _escape(text: str) -> str:
     return text.replace("|", "\\|").replace("\n", " ")
 
 
+def _as_int(value: Any, default: int) -> int:
+    """Read an integer from artifact metadata, falling back on bad input."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def archive_scalar(grid_data: dict[str, Any], key: str, default: float = 0.0) -> float:
     """Read a single saved scalar from the grid archive.
 
@@ -925,15 +937,32 @@ def render_markdown(
     }
 
     lines: list[str] = []
+    # Metadata comes from whichever build wrote the corpus, including older ones,
+    # so read the counts defensively rather than trusting the key to be numeric.
+    n_papers = _as_int(metadata.get("n_papers"), len(papers))
+    n_seeds = _as_int(metadata.get("n_seeds"), 0)
+    single_field = str(metadata.get("profile", "seed_first")) == "single_field"
+    labels_present = corpus_regime_labels(papers)
     lines.append("# ResearchRadar — Supported Knowledge Gaps in Robot Learning")
     lines.append("")
-    lines.append(
-        "Automated Knowledge Manifold Optimization (KMO) over a 120-document "
-        "corpus spanning three conflicting robotics regimes: classical system "
-        "identification, sim-to-real / domain randomization, and deep reinforcement "
-        "learning control. The corpus is founded on user-curated seeding papers "
-        "and expanded by a recency-bounded arXiv harvest."
-    )
+    if single_field:
+        query = str(metadata.get("queries", {}).get("0", "")) or "a single broad query"
+        lines.append(
+            f"Automated Knowledge Manifold Optimization (KMO) over a {n_papers}-document "
+            f"corpus harvested from one broad arXiv query with **no seeding papers**: "
+            f"`{query}`. Because there is no hand-drawn taxonomy, the "
+            f"{len(labels_present)} regions are discovered from the chart after "
+            f"projection (Discovery K=5, Reference K=8; Obayashi et al. 2026, Sec. 3.2) "
+            f"and named from each region's top TF-IDF terms: "
+            f"{', '.join(labels_present)}."
+        )
+    else:
+        lines.append(
+            f"Automated Knowledge Manifold Optimization (KMO) over a {n_papers}-document "
+            "corpus spanning conflicting robotics regimes: "
+            f"{', '.join(labels_present)}. The corpus is founded on user-curated "
+            "seeding papers and expanded by a recency-bounded arXiv harvest."
+        )
     lines.append("")
     lines.append(
         f"Method: Obayashi et al. (2026), *Knowledge Manifold Optimization*. "
@@ -973,6 +1002,12 @@ def render_markdown(
                             ].items()
                         )
                         + ")"
+                    )
+                    if not single_field
+                    else (
+                        f"{corpus['metadata']['n_harvested']} harvested, no seeding "
+                        "papers (Zero-Seed Mode; regions discovered after "
+                        "projection)"
                     ),
                 ],
                 [
@@ -1482,7 +1517,8 @@ def render_markdown(
     lines.append("## 9. Caveats")
     lines.append("")
     lines.append(
-        "- Novelty is **corpus-relative**. These are gaps in a 120-paper arXiv sample, "
+        "- Novelty is **corpus-relative**. These are gaps in a "
+        f"{n_papers}-paper arXiv sample, "
         "not proof that the topics are unexplored in the wider literature."
     )
     lines.append(
@@ -1491,12 +1527,22 @@ def render_markdown(
         "by heading detection, so a paper whose headings the PDF text layer mangles "
         "contributes a slightly different term distribution than its author intended."
     )
-    lines.append(
-        "- The corpus is founded on 15 user-curated seeding papers plus "
-        "35 harvested candidates per regime. The sim-to-real query returns only "
-        "~140 candidates corpus-wide, so that regime's 35 harvested slots are the "
-        "top 35 by relevance and have no headroom beyond review rejection."
-    )
+    if single_field:
+        lines.append(
+            "- This corpus has **no seeding papers**: it is one recency-bounded arXiv "
+            f"query harvested to {n_papers} documents over a fixed "
+            f"{metadata.get('lookback_years', 'N')}-year window. The regions are a "
+            "partition of this sample at K=5 and K=8, not an external taxonomy, so "
+            "their names describe what the clusters contain rather than fields a "
+            "reader would recognise in advance."
+        )
+    else:
+        lines.append(
+            f"- The corpus is founded on {n_seeds} user-curated seeding papers plus a "
+            "per-regime harvest quota. A regime whose query returns few candidates "
+            "fills its quota from the top results by relevance and has no headroom "
+            "beyond review rejection."
+        )
     lines.append(
         "- The reliability diagnostic `R` is reported but, per Sec. 4.3, is deliberately "
         "**not** a Pareto objective: maximizing low uncertainty favours already-dense "
@@ -1590,12 +1636,15 @@ def build_gap_packages(
     them.
     """
     papers = corpus["papers"]
-    regime_labels = [
-        str(regime.get("label", f"Regime {regime['id']}"))
-        for regime in config.get("regimes", [])
-    ]
+    # The corpus owns the labels: in Zero-Seed Mode they are discovered after
+    # projection and never appear in config.yaml, and in seed-first mode they are
+    # identical to the config's, so preferring the corpus is right in both.
+    regime_labels = corpus_regime_labels(papers)
     if not regime_labels:
-        regime_labels = sorted({str(paper["regime_label"]) for paper in papers})
+        regime_labels = [
+            str(regime.get("label", f"Regime {regime['id']}"))
+            for regime in config.get("regimes", [])
+        ]
 
     if paths is None:
         raise SystemExit(
@@ -1730,9 +1779,19 @@ def verify_outputs(
         LOGGER.error("HTML looks empty: %d bytes", html_size)
         ok = False
     html_text = paths.html.read_text(encoding="utf-8", errors="replace")
+    # Labels reach the page inside a JSON blob, and Plotly escapes them twice:
+    # ``·`` becomes ``\u00b7`` in the JSON and ``&#183;`` where it is reflected
+    # into markup.  Decode both before comparing, or a label containing any
+    # non-ASCII character can never be found and the check cries wolf.
+    decoded = html_module.unescape(
+        _JSON_UNICODE_ESCAPE_RE.sub(
+            lambda match: chr(int(match.group(1), 16)), html_text
+        )
+    )
+    haystack = " ".join(decoded.split())
     needles = ["Plotly.newPlot", "Practical Pareto gaps", *(regime_labels or ())]
     for needle in needles:
-        if needle not in html_text:
+        if " ".join(needle.split()) not in haystack:
             LOGGER.error("HTML is missing expected content: %r", needle)
             ok = False
 
@@ -1871,10 +1930,10 @@ def main(argv: list[str] | None = None) -> int:
 
     config = load_config(args.config)
     paths = resolve_paths(config, args.config)
-    template_path = (
-        args.template
-        if args.template.is_absolute()
-        else paths.config_dir / args.template
+    # The template is checkout material, not run output, so it may be found in
+    # the repository even when the config sits beside its own data/ tree.
+    template_path = resolve_asset_path(
+        paths.config_dir, args.template, str(PROMPT_TEMPLATE)
     )
 
     if args.verify_only:

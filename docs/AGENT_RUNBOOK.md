@@ -107,7 +107,7 @@ they set the harvest window.
    regime and then requires
    `seed_count + n_regimes × target_per_regime == target_total_papers`.
    Adding a 16th seed to the current config yields `16 + 3×35 = 121 ≠ 120`, and
-   the run hard-stops (§6) rather than writing 121 documents. Either raise
+   the run hard-stops (§7) rather than writing 121 documents. Either raise
    `target_total_papers` to the new sum, or lower `target_per_regime` to
    compensate. Update `seed_count` too — `--verify-fulltext` compares it
    against the number of PDFs actually present.
@@ -142,7 +142,7 @@ cosine guess is what you want.
 4. **Sanity-check each query against arXiv** before committing to a full
    harvest. A query with zero results is not an error the pipeline catches
    early — it produces a short harvest, and `harvest` will refuse to write
-   (§6). Test cheaply:
+   (§7). Test cheaply:
    ```bash
    .venv/bin/python - <<'PY'
    import arxiv
@@ -160,7 +160,117 @@ cosine guess is what you want.
 
 ---
 
-## 5. Checklist: changing text sanitation
+## 5. Checklist: Zero-Seed Mode (single-field exploration)
+
+Seed-first mode assumes you already know the field: you supply PDFs, name the
+regimes, and the harvest fills each one. Zero-Seed Mode is the opposite — you
+supply **one broad query** and the pipeline discovers the structure itself.
+
+### How the transition works
+
+Nothing about the downstream maths changes. `src.harvest` writes a corpus with
+no seeds; `src.manifold` then clusters the finished chart into Discovery K=5
+and Reference K=8, names every region from its own top TF-IDF terms, and writes
+those names **into the corpus**. From `src.pareto` onward the pipeline cannot
+tell the two modes apart, because it reads labels off the papers rather than
+out of `config.yaml`.
+
+The switch is one line in `config.yaml`:
+
+```yaml
+profile: single_field        # was: seed_first
+```
+
+Everything the mode needs lives in the `single_field:` block, which is ignored
+in seed-first mode, so it can be filled in permanently as a ready-to-run
+example:
+
+```yaml
+single_field:
+  query: 'abs:"robot manipulation" AND cat:cs.RO'
+  target_total_papers: 100     # must be >= 3 x reference_k (24)
+  years_back: 5                # fixed window; there are no seed years
+  name: "Robot Manipulation"   # display name for the field
+  label: "Field"                # placeholder label before discovery
+  discovery_k: 5
+  reference_k: 8
+```
+
+`src.common.load_config` normalises this into the shape every stage already
+understands: `seed_count: 0`, one placeholder regime, and a lookback of
+`years_back`. That is why no stage has a zero-seed branch of its own.
+
+### Steps
+
+1. **Set `profile: single_field`** and fill in `single_field.query`,
+   `target_total_papers`, and `years_back`.
+2. **Leave `docs/papers/desired/` alone.** It is not read in this mode.
+   `seed_overrides`, `seed_count`, `seed_match_margin`, and `seed_year_offset`
+   are ignored too — do not try to keep them in sync.
+3. **Leave `regimes:` alone.** It is replaced at load time. Editing it has no
+   effect, and a stale entry will not appear in any artifact.
+4. **Run the normal pipeline** (§2), unchanged:
+   ```bash
+   .venv/bin/python -m src.harvest --extract-text
+   .venv/bin/python -m src.embed
+   .venv/bin/python -m src.manifold      # <- discovers and names the regions
+   .venv/bin/python -m src.pareto
+   .venv/bin/python -m src.report
+   .venv/bin/python -m src.dashboard
+   ```
+5. **Read the discovered taxonomy.** `src.manifold` prints every region at both
+   resolutions and writes `data/regimes_auto.json`:
+   ```bash
+   .venv/bin/python -c "import json;d=json.load(open('data/regimes_auto.json'));\
+   [print(x['size'], x['label'], x['terms']) for x in d['discovery']]"
+   ```
+   It also stamps `regime_id`/`regime_label`/`regime_name` onto every paper in
+   both corpus files and updates `metadata.regime_counts`, so the report and the
+   website legend show the discovered regions rather than the placeholder.
+6. **Verify** exactly as in §2. The region count in the output should match
+   `discovery_k`, not `len(config['regimes'])`.
+
+### What is different from seed-first mode
+
+| | seed-first | single_field |
+| --- | --- | --- |
+| Corpus size | `seed_count + n_regimes × target_per_regime` | `target_total_papers` |
+| Recency window | `min(seed_years) - seed_year_offset`, clamped | fixed `years_back` |
+| Regime ids | from `config.yaml::regimes`, pinned per seed | discovered after projection |
+| Region names | written by you | top TF-IDF terms per cluster |
+| `docs/papers/` | required | ignored |
+| `P_boundary` | unchanged — harmonic mean of `k5_global`, `k8_global`, `k8_adaptive` | unchanged |
+
+Regions are drawn from the **2D chart**, so each one is a contiguous patch;
+naming them uses TF-IDF enrichment *within* each cluster (mean share in the
+cluster versus the corpus, floored at 2 documents and 10% of the cluster). A
+region whose candidates are all prose filler falls back to `Region N`. If the
+labels read like noise, the field is probably too heterogeneous for one query —
+narrow it rather than raising `discovery_k`.
+
+### Pitfalls
+
+- **Both profiles write the same paths.** Switching to `single_field` and
+  running replaces the seed-first corpus and every downstream artefact. Commit
+  or copy what you want to keep first; there is no side-by-side mode.
+- **Relative paths are anchored at the config file**, in every stage. A config
+  kept at `/tmp/field/config.yaml` writes `/tmp/field/data/…` no matter which
+  directory you run from, so two profiles can live side by side as long as each
+  config sits in its own directory.
+- **`target_total_papers` below 24 is rejected** at load time, because the K=8
+  Reference partition needs papers to put in its eight clusters.
+- **A broad query still needs yield.** The harvest must return
+  `target_total_papers` papers *after* the recency window, review exclusion, and
+  deduplication. Check the total before committing to a long run, and expect
+  single-word queries such as `cat:cs.RO` alone to blow past
+  `corpus.max_query_results`.
+- **Seed-first prose is stale.** `README.md` describes the robotics regimes;
+  after a `single_field` run, regenerate artifacts (never hand-edit them) and
+  treat any prose naming the old regimes as out of date.
+
+---
+
+## 6. Checklist: changing text sanitation
 
 Sanitation is a pure function of the raw extraction, so this never needs the
 network.
@@ -190,7 +300,7 @@ is undone.
 
 ---
 
-## 6. What the guard rails are telling you
+## 7. What the guard rails are telling you
 
 | Message | Meaning | Action |
 | --- | --- | --- |
@@ -199,6 +309,7 @@ is undone.
 | `fails the extraction audit` | PDF has no usable text layer | supply a text-layer PDF, or let the ar5iv fallback run |
 | `still carries N bibliographic locator(s)` | citation/URL stripping regressed | fix the sanitiser, add a regression test |
 | `Cannot refresh text for N paper(s) with no raw source` | cache gap after a rule change | re-run the full harvest instead of `--refresh-fulltext` |
+| `single_field.target_total_papers must be at least 24` | Zero-Seed corpus too small for a K=8 partition | raise it to at least `3 × reference_k` |
 
 A short harvest is a **hard stop on purpose**. Writing an 85-paper corpus over
 a good 120-paper one is silent data loss, and every downstream artefact would
@@ -206,7 +317,7 @@ happily be built from it.
 
 ---
 
-## 7. Ground rules
+## 8. Ground rules
 
 - **Use the venv.** `.venv/bin/python` for everything. Never install into the
   base conda environment.

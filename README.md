@@ -18,7 +18,39 @@ Implemented: **Phase 1** (environment + corpus + full text), **Phase 2**
 (report, dashboard, prompt payload), and **Phase 7** (the Appendix A.2 audit that
 checks whatever an LLM returns for that prompt).
 
+## Two modes, one switch
+
+`config.yaml` starts with `profile:`, and every stage reads it:
+
+| `profile` | Corpus | Regimes |
+| --- | --- | --- |
+| `seed_first` (default) | your PDFs in `docs/papers/desired/` plus a per-regime harvest | declared in `config.yaml::regimes` |
+| `single_field` | one broad query harvested to `single_field.target_total_papers`, no seeds | discovered after projection and named from their own TF-IDF terms |
+
+In `single_field` (Zero-Seed) mode the regimes below are not used: `src.manifold`
+clusters the finished chart at Discovery K=5 and Reference K=8 (paper Sec. 3.2),
+names each region from the terms that are over-represented inside it, and writes
+those names into the corpus, so `src.pareto`, `src.report`, and the dashboard all
+pick them up without knowing the mode exists. `P_boundary` is unchanged in both
+modes — it is the harmonic mean over `k5_global`, `k8_global`, and `k8_adaptive`
+(Eq. 21) and never reads the regime labels.
+
+```yaml
+profile: single_field
+single_field:
+  query: 'abs:"robot manipulation" AND cat:cs.RO'
+  target_total_papers: 100
+  years_back: 5
+  discovery_k: 5
+  reference_k: 8
+```
+
+Both profiles write the same artifact paths, so running one replaces the other's
+corpus. See `docs/AGENT_RUNBOOK.md` §5 for the full checklist.
+
 ## Regimes
+
+Applies to `profile: seed_first`.
 
 | ID | Label | Query |
 | --- | --- | --- |
@@ -320,13 +352,14 @@ for a human instead of returning a verdict.
 
 ```text
 config.yaml                       queries, limits, model/analysis parameters
-docs/AGENT_RUNBOOK.md             operating checklist: run order, changing seeds/regimes
+docs/AGENT_RUNBOOK.md             operating checklist: run order, seeds, regimes, zero-seed
 docs/implementation-notes.md      non-obvious environment traps and decisions
 docs/kmo_prompt_template_A1.txt   Appendix A.1 template (one documented edit)
 docs/kmo_prompt_template_A1.original.txt   pristine extract from the paper
 src/harvest.py                    arXiv harvesting, PDF/ar5iv text, sanitation
 src/embed.py                      char n-gram TF-IDF + whole-word reconstruction
-src/common.py                     config loading, path resolution, logging
+src/common.py                     config loading, profile normalisation, paths, logging
+src/regimes.py                    Zero-Seed discovery: chart clusters -> named regions
 src/manifold.py                   MDS, discovery grid, the four KMO objectives
 src/pareto.py                     exact dominance, practical front, archetypes
 src/report.py                     Plotly map, Markdown report, LLM prompt

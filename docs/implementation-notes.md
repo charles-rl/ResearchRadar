@@ -426,6 +426,37 @@ work of an earlier one:
 `tests/test_sanitize.py`, and `corpus.json` carries a `text_fingerprint` so a
 text-level drift is visible without diffing 4.5 MB of full text.
 
+## Two profiles, one pipeline
+
+`config.yaml::profile` selects between `seed_first` (hand-picked PDFs plus a
+per-regime harvest) and `single_field` (one broad query, no seeds, regions
+discovered after projection). The alternative was a second set of stage
+modules or a `if single_field` branch in each of the six stages; both put the
+same logic in two places and let a bug live in only one of them.
+
+Instead `src.common.resolve_profile_config` rewrites the config into the shape
+the stages already understand — `seed_count: 0`, one placeholder regime whose
+quota is the whole corpus, and a fixed lookback — so no stage knows the mode
+exists. Detection happens where the information actually is:
+
+- `src.harvest` skips seed extraction and drops the year-derived window.
+- `src.manifold` clusters the finished 2D chart at K=5 and K=8 and names the
+  regions, then **writes the labels into the corpus**. Every renderer already
+  reads `regime_label` from the papers, so the report and the dashboard follow
+  automatically; had they read `config.yaml::regimes`, the single placeholder
+  query would have coloured the entire map one hue.
+
+Regions are drawn from the chart because a legend must describable by pointing
+at the picture. Naming them uses TF-IDF *enrichment* (cluster mean over corpus
+mean), not raw mass: a word that is everywhere scores 1.0 and names nothing, so
+a 1.05 floor keeps the third label slot from filling with a generic word.
+`P_boundary` is untouched — it was never a function of the regime labels.
+
+Both profiles resolve artifacts through the same relative paths, anchored at
+the config file. Harvest used to resolve them against the working directory,
+which made a second config silently overwrite `data/` in the repository instead
+of writing beside itself; `_config_path` now applies the one rule everywhere.
+
 ## Offline verification
 
 All stages verify without network access and exit non-zero on failure:

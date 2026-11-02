@@ -4,6 +4,53 @@
 # Phase 1/2 configuration: literature harvesting across three conflicting
 # robotics paradigms (Obayashi et al. 2026, Knowledge Manifold Optimization).
 
+# ---------------------------------------------------------------------------
+# Pipeline profile
+#
+# seed_first    (default) Hand-picked seeding PDFs anchor the corpus and a
+#               per-regime harvest expands it, using the `regimes:` list below.
+#
+# single_field  Zero-Seed Mode.  No seeding PDFs and no manual taxonomy: one
+#               broad query is harvested to a fixed size, and the regimes are
+#               discovered from the chart by `src.manifold` (Discovery K=5,
+#               Reference K=8) and named from their own top TF-IDF terms.
+#               Everything it needs lives in the `single_field:` block below.
+#
+# Switching profile is one line.  Both profiles write the same artifact paths,
+# so a run in one mode replaces the other's corpus: commit or copy the outputs
+# you want to keep before switching back.
+profile: seed_first
+
+# Settings for `profile: single_field`.  Ignored in seed-first mode, so it can
+# stay filled in as a ready-to-run example.  Only `query`, `years_back, and
+# `target_total_papers` are required.
+single_field:
+  # One broad arXiv query.  This replaces the whole `regimes:` list: in
+  # Zero-Seed Mode every paper comes from this query, and the harvest quota
+  # becomes the corpus total.
+  query: 'abs:"robot manipulation" AND cat:cs.RO'
+  # Corpus size.  Must be at least 3 x reference_k (24) so that both partitions
+  # have enough documents to be meaningful.
+  target_total_papers: 100
+  # Fixed recency window, in years back from today.  Seed-first mode derives the
+  # window from seed years instead; with no seeds there is nothing to derive it
+  # from, so it is stated explicitly here.
+  years_back: 5
+  # Display name for the field, used in the report header and the log lines.
+  name: "Robot Manipulation"
+  label: "Field"
+  description: >-
+    Robotic manipulation: grasping, dexterous hands, tactile sensing, and
+    manipulation policy learning.
+  keywords:
+    - "robot manipulation"
+    - "grasping"
+    - "dexterous manipulation"
+  # Sec. 3.2 resolutions.  Discovery is the scale the map is labelled at;
+  # Reference is the finer partition reported for cross-checking.
+  discovery_k: 5
+  reference_k: 8
+
 corpus:
   # Seed-First Expansion.  The 15 hand-picked seeding PDFs in
   # fulltext.seeds_dir occupy doc 1..doc 15; freshly harvested papers fill

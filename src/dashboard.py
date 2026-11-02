@@ -34,9 +34,11 @@ from .common import (
     LOGGER,
     Paths,
     configure_logging,
+    corpus_regime_labels,
     is_seed_paper,
     load_config,
     paper_source_url,
+    resolve_asset_path,
     resolve_paths,
 )
 from .report import (
@@ -76,6 +78,7 @@ def dashboard_palette(labels: list[str]) -> dict[str, str]:
         label: DASHBOARD_PALETTE[position % len(DASHBOARD_PALETTE)]
         for position, label in enumerate(labels)
     }
+
 
 #: Plotly reads ``z[i][j]`` at ``(y=axis[i], x=axis[j])``, so the field matrix is
 #: transposed by ``objective_field`` before it reaches the browser.
@@ -261,33 +264,25 @@ def build_payload(
         4,
     )
 
-    regimes = []
-    colours = dashboard_palette([
-        str(regime.get("label", f"Regime {regime['id']}"))
-        for regime in config.get("regimes", [])
-    ])
-    for regime in config.get("regimes", []):
-        label = str(regime.get("label", f"Regime {regime['id']}"))
-        regimes.append(
-            {
-                "id": int(regime["id"]),
-                "label": label,
-                "name": str(regime.get("name", label)),
-                "color": colours.get(label, "#94a3b8"),
-            }
-        )
-    if not regimes:
-        labels = sorted({str(paper["regime_label"]) for paper in corpus["papers"]})
-        colours = dashboard_palette(labels)
-        regimes = [
-            {
-                "id": position,
-                "label": label,
-                "name": label,
-                "color": colours.get(label, "#94a3b8"),
-            }
-            for position, label in enumerate(labels)
-        ]
+    # The corpus is the authority on regime labels, not config.yaml.  Zero-Seed
+    # Mode discovers its regions after projection, so a legend built from the
+    # config would show the single placeholder query regime and colour the whole
+    # map one hue.  Names from the config are kept as descriptions where a label
+    # matches, which is what seed-first mode always had.
+    corpus_labels = corpus_regime_labels(corpus["papers"])
+    by_label = {
+        str(regime.get("label")): regime for regime in config.get("regimes", [])
+    }
+    colours = dashboard_palette(corpus_labels)
+    regimes = [
+        {
+            "id": position,
+            "label": label,
+            "name": str(by_label.get(label, {}).get("name", label)),
+            "color": colours.get(label, "#94a3b8"),
+        }
+        for position, label in enumerate(corpus_labels)
+    ]
 
     return {
         "meta": {
@@ -348,7 +343,9 @@ def render_dashboard(
             f"Dashboard template {template_path} is missing the {PLACEHOLDER} slot"
         )
 
-    prompt_template_path = paths.config_dir / PROMPT_TEMPLATE
+    prompt_template_path = resolve_asset_path(
+        paths.config_dir, PROMPT_TEMPLATE, str(PROMPT_TEMPLATE)
+    )
     if not prompt_template_path.is_file():
         raise SystemExit(
             f"Verbatim Appendix A.1 template not found: {prompt_template_path}"
@@ -597,11 +594,11 @@ def main(argv: list[str] | None = None) -> int:
 
     config = load_config(args.config)
     paths = resolve_paths(config, args.config)
-    template_path = (
-        args.template if args.template is not None else paths.dashboard_template
+    # Templates are checkout material, not run output, so they may be found in the
+    # repository even when the config sits beside its own data/ tree.
+    template_path = resolve_asset_path(
+        paths.config_dir, args.template, str(paths.dashboard_template)
     )
-    if not template_path.is_absolute() and args.template is not None:
-        template_path = paths.config_dir / template_path
 
     if args.verify_only:
         return 0 if verify_dashboard(paths) else 1

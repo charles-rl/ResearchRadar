@@ -47,9 +47,10 @@ from typing import Any
 import arxiv
 import numpy as np
 import requests
-import yaml
 from lxml import html as lxml_html
 from sklearn.feature_extraction.text import TfidfVectorizer
+
+from .common import is_single_field, load_config
 
 LOGGER = logging.getLogger("research_radar.harvest")
 
@@ -585,8 +586,19 @@ def load_corpus(path: Path) -> dict[str, Any]:
         raise SystemExit(f"Corpus file is not valid JSON ({path}): {exc}") from exc
 
 
-def verify_corpus(corpus: dict[str, Any], target_per_regime: int) -> bool:
-    """Validate regime balance and the required schema fields."""
+def verify_corpus(
+    corpus: dict[str, Any],
+    target_per_regime: int,
+    single_field: bool = False,
+    target_total: int | None = None,
+) -> bool:
+    """Validate regime balance and the required schema fields.
+
+    Seed-First mode checks a per-regime harvest quota.  Zero-Seed Mode cannot:
+    its regions are discovered from the chart, so their sizes are whatever the
+    partition produced, and the only quota that means anything is the corpus
+    total.  Uniqueness, schema, and document labelling are checked in both.
+    """
     ok = True
     papers = corpus.get("papers", [])
     regimes: dict[str, list[dict[str, Any]]] = {}
@@ -617,14 +629,27 @@ def verify_corpus(corpus: dict[str, Any], target_per_regime: int) -> bool:
         regimes.setdefault(str(paper["regime_label"]), []).append(paper)
 
     LOGGER.info("Verifying corpus: %d papers total", len(papers))
+    if single_field and target_total is not None and len(papers) != target_total:
+        LOGGER.error(
+            "Zero-Seed Mode expects %d documents, corpus has %d",
+            target_total,
+            len(papers),
+        )
+        ok = False
+
     for label, items in sorted(regimes.items()):
         ids = {item["id"] for item in items}
         titles = {normalize_title(item["title"]) for item in items}
         harvested = sum(1 for item in items if not item.get("is_seed"))
         seeds = len(items) - harvested
         # Seeds join whichever regime they were assigned to, so a regime holds
-        # its harvest quota plus its seeds.  Only a shortfall is an error.
-        status = "OK" if harvested == target_per_regime else "SHORT"
+        # its harvest quota plus its seeds.  Only a shortfall is an error.  In
+        # Zero-Seed Mode there is no quota to compare against: the region sizes
+        # come from the discovered partition, not from the config.
+        if single_field:
+            status = "OK"
+        else:
+            status = "OK" if harvested == target_per_regime else "SHORT"
         LOGGER.info(
             "  %-10s %3d papers = %d harvested + %d seeds "
             "(unique ids=%d, unique titles=%d) -> %s",
@@ -636,7 +661,7 @@ def verify_corpus(corpus: dict[str, Any], target_per_regime: int) -> bool:
             len(titles),
             status,
         )
-        if harvested != target_per_regime:
+        if not single_field and harvested != target_per_regime:
             ok = False
         if len(ids) != len(items) or len(titles) != len(items):
             LOGGER.error("  %s contains duplicate IDs or titles", label)
@@ -2419,7 +2444,23 @@ def _harvested_record(
     return record
 
 
-def build_fulltext_corpus(config: dict[str, Any]) -> dict[str, Any]:
+def _config_path(config_dir: Path, value: Any, default: str) -> Path:
+    """Resolve a config path against the config file's own directory.
+
+    Every other stage resolves artifacts through ``src.common.resolve_paths``,
+    which anchors relative paths at the config file.  Harvest used to read them
+    relative to the current working directory instead, so the same config
+    produced different files depending on where it was invoked from — and a
+    second config kept beside the first wrote into the repository's ``data/``
+    rather than beside itself.  Anchoring here restores the one rule.
+    """
+    path = Path(str(value if value is not None else default)).expanduser()
+    return path if path.is_absolute() else Path(config_dir) / path
+
+
+def build_fulltext_corpus(
+    config: dict[str, Any], config_dir: Path = Path(".")
+) -> dict[str, Any]:
     """Seed-First Expansion: build the whole corpus in one pass.
 
     Order is load-bearing.  Seeds are extracted first because their publication
@@ -2438,10 +2479,18 @@ def build_fulltext_corpus(config: dict[str, Any]) -> dict[str, Any]:
     """
     fulltext_cfg = config.get("fulltext", {}) or {}
     corpus_cfg = config.get("corpus", {}) or {}
-    corpus_path = Path(corpus_cfg.get("output_path", "data/corpus.json"))
-    out_path = Path(fulltext_cfg.get("output_path", "data/corpus_fulltext.json"))
-    desired_dir = Path(fulltext_cfg.get("seeds_dir", "docs/papers/desired"))
-    cache_dir = Path(fulltext_cfg.get("cache_dir", "data/fulltext_cache"))
+    corpus_path = _config_path(
+        config_dir, corpus_cfg.get("output_path"), "data/corpus.json"
+    )
+    out_path = _config_path(
+        config_dir, fulltext_cfg.get("output_path"), "data/corpus_fulltext.json"
+    )
+    desired_dir = _config_path(
+        config_dir, fulltext_cfg.get("seeds_dir"), "docs/papers/desired"
+    )
+    cache_dir = _config_path(
+        config_dir, fulltext_cfg.get("cache_dir"), "data/fulltext_cache"
+    )
     delay = _config_float(fulltext_cfg, "delay_seconds", 3.0)
     gate = QualityGate.from_config(fulltext_cfg)
     target_total = _config_int(corpus_cfg, "target_total_papers", 120)
@@ -2450,23 +2499,36 @@ def build_fulltext_corpus(config: dict[str, Any]) -> dict[str, Any]:
     session.headers.update({"User-Agent": FULLTEXT_USER_AGENT})
 
     # --- 1. seeds -----------------------------------------------------------
-    LOGGER.info("Step 1/5: extracting seeding papers from %s", desired_dir)
-    seeds, seed_failures = extract_seed_documents(
-        desired_dir, session, delay, gate, cache_dir=cache_dir
-    )
-    if seed_failures:
-        names = ", ".join(path.name for path in seed_failures)
-        raise SystemExit(
-            "These seeding PDFs could not be extracted and are required by "
-            f"Seed-First Expansion: {names}"
+    single_field = is_single_field(config)
+    if single_field:
+        # Zero-Seed Mode: there is no seed directory to read, so the harvest
+        # window is the fixed lookback in the profile rather than a year derived
+        # from seed publication dates.
+        seeds = []
+        seed_failures = []
+        LOGGER.info(
+            "Step 1/5: Zero-Seed Mode, no seeding papers (single query, "
+            "%d documents)",
+            target_total,
         )
-    if not seeds:
-        raise SystemExit(f"No seeding PDFs found under {desired_dir}")
-    LOGGER.info(
-        "Seeds extracted: %d documents, years %s",
-        len(seeds),
-        sorted({doc.year for doc in seeds if doc.year is not None}),
-    )
+    else:
+        LOGGER.info("Step 1/5: extracting seeding papers from %s", desired_dir)
+        seeds, seed_failures = extract_seed_documents(
+            desired_dir, session, delay, gate, cache_dir=cache_dir
+        )
+        if seed_failures:
+            names = ", ".join(path.name for path in seed_failures)
+            raise SystemExit(
+                "These seeding PDFs could not be extracted and are required by "
+                f"Seed-First Expansion: {names}"
+            )
+        if not seeds:
+            raise SystemExit(f"No seeding PDFs found under {desired_dir}")
+        LOGGER.info(
+            "Seeds extracted: %d documents, years %s",
+            len(seeds),
+            sorted({doc.year for doc in seeds if doc.year is not None}),
+        )
 
     # --- 2. dynamic cutoff --------------------------------------------------
     start_year = harvest_start_year((doc.year for doc in seeds), config)
@@ -2503,15 +2565,19 @@ def build_fulltext_corpus(config: dict[str, Any]) -> dict[str, Any]:
         )
 
     # --- 5. seed regime assignment -----------------------------------------
-    LOGGER.info("Step 4/5: assigning each seed to a regime")
-    assignments = assign_seed_regimes(
-        seeds,
-        config,
-        [
-            {"text": doc.text, "regime_id": paper["regime_id"]}
-            for doc, paper in zip(corpus_docs, harvested_papers, strict=True)
-        ],
-    )
+    if seeds:
+        LOGGER.info("Step 4/5: assigning each seed to a regime")
+        assignments = assign_seed_regimes(
+            seeds,
+            config,
+            [
+                {"text": doc.text, "regime_id": paper["regime_id"]}
+                for doc, paper in zip(corpus_docs, harvested_papers, strict=True)
+            ],
+        )
+    else:
+        LOGGER.info("Step 4/5: no seeds to assign (Zero-Seed Mode)")
+        assignments = []
 
     # --- 6. unify -----------------------------------------------------------
     papers: list[dict[str, Any]] = []
@@ -2548,7 +2614,12 @@ def build_fulltext_corpus(config: dict[str, Any]) -> dict[str, Any]:
     sanitation_totals = _sanitation_totals([*seeds, *corpus_docs])
 
     metadata = {
-        "generated_by": "src.harvest (Seed-First Expansion, Phase 1)",
+        "generated_by": (
+            "src.harvest (Single-Field Exploration, Zero-Seed Mode)"
+            if single_field
+            else "src.harvest (Seed-First Expansion, Phase 1)"
+        ),
+        "profile": "single_field" if single_field else "seed_first",
         "reference": (
             "Obayashi et al. (2026) Knowledge Manifold Optimization, "
             "Sec. 5.1-5.2 and Appendix A.1"
@@ -2585,12 +2656,20 @@ def build_fulltext_corpus(config: dict[str, Any]) -> dict[str, Any]:
         "failed_papers": [],
         "failed_seeds": [],
     }
+    if single_field:
+        metadata["lookback_years"] = _config_int(corpus_cfg, "lookback_years", 5)
+        metadata["regimes_source"] = "auto-discovered by src.manifold after projection"
 
     payload = {"metadata": metadata, "papers": papers}
 
     # corpus.json carries metadata only; corpus_fulltext.json adds the text.
     corpus_payload = {
-        "metadata": {**metadata, "generated_by": "src.harvest (Seed-First)"},
+        "metadata": {
+            **metadata,
+            "generated_by": (
+                "src.harvest (Single-Field)" if single_field else "src.harvest (Seed-First)"
+            ),
+        },
         "papers": [
             {key: value for key, value in paper.items() if key != "full_text"}
             for paper in papers
@@ -2615,7 +2694,9 @@ def build_fulltext_corpus(config: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def refresh_fulltext_from_cache(config: dict[str, Any]) -> dict[str, Any]:
+def refresh_fulltext_from_cache(
+    config: dict[str, Any], config_dir: Path = Path(".")
+) -> dict[str, Any]:
     """Re-sanitise an existing corpus from the raw cache, without touching arXiv.
 
     Sanitation is a pure function of the raw extraction, and the cache holds that
@@ -2629,9 +2710,15 @@ def refresh_fulltext_from_cache(config: dict[str, Any]) -> dict[str, Any]:
     """
     fulltext_cfg = config.get("fulltext", {}) or {}
     corpus_cfg = config.get("corpus", {}) or {}
-    fulltext_path = Path(fulltext_cfg.get("output_path", "data/corpus_fulltext.json"))
-    desired_dir = Path(fulltext_cfg.get("seeds_dir", "docs/papers/desired"))
-    cache_dir = Path(fulltext_cfg.get("cache_dir", "data/fulltext_cache"))
+    fulltext_path = _config_path(
+        config_dir, fulltext_cfg.get("output_path"), "data/corpus_fulltext.json"
+    )
+    desired_dir = _config_path(
+        config_dir, fulltext_cfg.get("seeds_dir"), "docs/papers/desired"
+    )
+    cache_dir = _config_path(
+        config_dir, fulltext_cfg.get("cache_dir"), "data/fulltext_cache"
+    )
     gate = QualityGate.from_config(fulltext_cfg)
 
     payload = load_corpus(fulltext_path)
@@ -2703,7 +2790,9 @@ def refresh_fulltext_from_cache(config: dict[str, Any]) -> dict[str, Any]:
     write_corpus(payload, fulltext_path)
 
     # corpus.json carries metadata only; keep its fingerprint in step.
-    corpus_path = Path(corpus_cfg.get("output_path", "data/corpus.json"))
+    corpus_path = _config_path(
+        config_dir, corpus_cfg.get("output_path"), "data/corpus.json"
+    )
     if corpus_path.is_file():
         corpus_payload = load_corpus(corpus_path)
         corpus_payload.setdefault("metadata", {})["text_fingerprint"] = (
@@ -2846,7 +2935,10 @@ def verify_fulltext(
 # --------------------------------------------------------------------------- #
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Harvest the three-regime ResearchRadar arXiv corpus."
+        description=(
+            "Harvest the ResearchRadar arXiv corpus (seed-first, or a single "
+            "broad field in Zero-Seed Mode)."
+        )
     )
     parser.add_argument(
         "--config", type=Path, default=DEFAULT_CONFIG, help="Path to config.yaml"
@@ -2896,27 +2988,28 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     try:
-        with args.config.open("r", encoding="utf-8") as handle:
-            config = yaml.safe_load(handle)
-    except FileNotFoundError:
-        LOGGER.error("Config file not found: %s", args.config)
-        return 2
-    except yaml.YAMLError as exc:
-        LOGGER.error("Config file is not valid YAML (%s): %s", args.config, exc)
-        return 2
-
-    if not isinstance(config, dict):
-        LOGGER.error("Config file must contain a mapping: %s", args.config)
+        config = load_config(args.config)
+    except SystemExit as exc:
+        LOGGER.error("%s", exc)
         return 2
 
     corpus_cfg = config.get("corpus", {})
-    out_path = Path(args.out or corpus_cfg.get("output_path", "data/corpus.json"))
+    config_dir = args.config.parent
+    out_path = (
+        Path(args.out)
+        if args.out
+        else _config_path(
+            config_dir, corpus_cfg.get("output_path"), "data/corpus.json"
+        )
+    )
     target_per_regime = int(corpus_cfg.get("target_per_regime", 35))
     target_total = int(corpus_cfg.get("target_total_papers", 120))
     seed_count = int(corpus_cfg.get("seed_count", 15))
 
     fulltext_cfg = config.get("fulltext", {}) or {}
-    fulltext_path = Path(fulltext_cfg.get("output_path", "data/corpus_fulltext.json"))
+    fulltext_path = _config_path(
+        config_dir, fulltext_cfg.get("output_path"), "data/corpus_fulltext.json"
+    )
 
     if args.verify_fulltext:
         return (
@@ -2932,10 +3025,19 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.verify_only:
         corpus = load_corpus(out_path)
-        return 0 if verify_corpus(corpus, target_per_regime) else 1
+        return (
+            0
+            if verify_corpus(
+                corpus,
+                target_per_regime,
+                single_field=is_single_field(config),
+                target_total=target_total,
+            )
+            else 1
+        )
 
     if args.refresh_fulltext:
-        payload = refresh_fulltext_from_cache(config)
+        payload = refresh_fulltext_from_cache(config, config_dir=config_dir)
         return (
             0
             if verify_fulltext(
@@ -2948,7 +3050,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if args.extract_text:
-        payload = build_fulltext_corpus(config)
+        payload = build_fulltext_corpus(config, config_dir=config_dir)
         return (
             0
             if verify_fulltext(
@@ -2964,7 +3066,16 @@ def main(argv: list[str] | None = None) -> int:
     # Seed-First rebuild is --extract-text, which produces both artifacts.
     corpus = harvest_all(config)
     write_corpus(corpus, out_path)
-    return 0 if verify_corpus(corpus, target_per_regime) else 1
+    return (
+        0
+        if verify_corpus(
+            corpus,
+            target_per_regime,
+            single_field=is_single_field(config),
+            target_total=target_total,
+        )
+        else 1
+    )
 
 
 if __name__ == "__main__":
