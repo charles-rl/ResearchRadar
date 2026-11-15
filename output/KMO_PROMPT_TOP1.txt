@@ -1,7 +1,7 @@
 You are participating in a controlled experiment.  A deterministic 
 pipeline has analyzed a corpus of papers and exported a machine-computed 
 **evidence package** for one location on its knowledge map — the attached 
-`evidence_point_+0.40_+0.80.json`, as produced by `code/make_evidence.py`. 
+`evidence_point_+0.10_+0.50.json`, as produced by `code/make_evidence.py`. 
 No real paper occupies that location.  Your task is to write the 
 **virtual document**: a description of the research that *would* occupy 
 it. 
@@ -56,17 +56,17 @@ Deliverables
 Output Task A, then Task B, then the `Evidence used:` list.  Do not 
 include anything else — no reasoning trace, no extra sections. 
 
---- attached: evidence_point_+0.40_+0.80.json ---
+--- attached: evidence_point_+0.10_+0.50.json ---
 {
   "location": {
-    "x": 0.4,
-    "y": 0.8
+    "x": 0.1,
+    "y": 0.5
   },
   "theme_lens_L2": [
     {
       "term": "representation",
-      "weight": 0.49634,
-      "df": 95,
+      "weight": 0.54446,
+      "df": 115,
       "word_forms": [
         "represent",
         "representation",
@@ -79,15 +79,15 @@ include anything else — no reasoning trace, no extra sections.
     },
     {
       "term": "representation-learning",
-      "weight": 0.46944,
-      "df": 2,
+      "weight": 0.5167,
+      "df": 4,
       "word_forms": [
         "representation-learning"
       ]
     },
     {
       "term": "reinforcement-learning",
-      "weight": 0.4489,
+      "weight": 0.46171,
       "df": 3,
       "word_forms": [
         "reinforcement-learned",
@@ -95,17 +95,18 @@ include anything else — no reasoning trace, no extra sections.
       ]
     },
     {
-      "term": "reinforcement-learningbased",
-      "weight": 0.44604,
+      "term": "state-representation",
+      "weight": 0.42289,
       "df": 2,
       "word_forms": [
-        "reinforcement-learningbased"
+        "state-representation",
+        "state-representations"
       ]
     },
     {
       "term": "generalization",
-      "weight": 0.40353,
-      "df": 83,
+      "weight": 0.39693,
+      "df": 86,
       "word_forms": [
         "generalisation",
         "generalising",
@@ -115,9 +116,55 @@ include anything else — no reasoning trace, no extra sections.
       ]
     },
     {
-      "term": "optimal",
-      "weight": 0.39025,
-      "df": 87,
+      "term": "parameterized",
+      "weight": 0.39602,
+      "df": 51,
+      "word_forms": [
+        "parameterizations",
+        "parameterize",
+        "parameterized",
+        "parameterizes"
+      ]
+    },
+    {
+      "term": "generalize",
+      "weight": 0.39452,
+      "df": 90,
+      "word_forms": [
+        "generalizations",
+        "generalize",
+        "generalized",
+        "generalizes"
+      ]
+    },
+    {
+      "term": "observations",
+      "weight": 0.38977,
+      "df": 117,
+      "word_forms": [
+        "observation",
+        "observational",
+        "observations",
+        "observe",
+        "observed",
+        "observer",
+        "observers",
+        "observes",
+        "observing"
+      ]
+    },
+    {
+      "term": "simulation-to-reality",
+      "weight": 0.38975,
+      "df": 3,
+      "word_forms": [
+        "simulation-to-reality"
+      ]
+    },
+    {
+      "term": "optimization",
+      "weight": 0.3889,
+      "df": 104,
       "word_forms": [
         "optim",
         "optimal",
@@ -129,125 +176,68 @@ include anything else — no reasoning trace, no extra sections.
       ]
     },
     {
-      "term": "representation-based",
-      "weight": 0.37037,
+      "term": "parameter-conditioned",
+      "weight": 0.38195,
+      "df": 3,
+      "word_forms": [
+        "parameter-conditioned"
+      ]
+    },
+    {
+      "term": "demonstration-based",
+      "weight": 0.37839,
       "df": 2,
       "word_forms": [
-        "representation-based"
-      ]
-    },
-    {
-      "term": "specific",
-      "weight": 0.35532,
-      "df": 93,
-      "word_forms": [
-        "specific",
-        "specifically",
-        "specification",
-        "specifications",
-        "specificity",
-        "specifics"
-      ]
-    },
-    {
-      "term": "reward-maximizing",
-      "weight": 0.33784,
-      "df": 4,
-      "word_forms": [
-        "reward-maximising",
-        "reward-maximization",
-        "reward-maximizing"
-      ]
-    },
-    {
-      "term": "transformer",
-      "weight": 0.3355,
-      "df": 52,
-      "word_forms": [
-        "transform",
-        "transformation",
-        "transformations",
-        "transformed",
-        "transformer",
-        "transformers",
-        "transforming",
-        "transforms"
-      ]
-    },
-    {
-      "term": "maximizing",
-      "weight": 0.32613,
-      "df": 34,
-      "word_forms": [
-        "maximal",
-        "maximally",
-        "maximisation",
-        "maximising",
-        "maximization",
-        "maximizing"
-      ]
-    },
-    {
-      "term": "conditions",
-      "weight": 0.32295,
-      "df": 87,
-      "word_forms": [
-        "condition",
-        "conditional",
-        "conditionally",
-        "conditioned",
-        "conditioner",
-        "conditioning",
-        "conditions"
+        "demonstration-based"
       ]
     }
   ],
   "concentration_lens_L1": [],
   "contributing_documents_top3": [
     {
-      "doc": "doc 39",
-      "source": "https://arxiv.org/abs/2411.19418v2",
-      "is_seed": false,
-      "title": "Proto Successor Measure: Representing the Behavior Space of an RL Agent",
+      "doc": "doc 2",
+      "source": "https://arxiv.org/abs/2109.11978v3",
+      "is_seed": true,
+      "title": "Learning to Walk in Minutes Using Massively Parallel Deep Reinforcement Learning",
       "authors": [
-        "Siddhant Agarwal",
-        "Harshit Sikchi",
-        "Peter Stone"
+        "Nikita Rudin",
+        "David Hoeller",
+        "Philipp Reist"
       ],
-      "year": 2024,
-      "regime": "language models · reward",
-      "weight": 0.1328
+      "year": 2021,
+      "regime": "Sim2Real-Physics",
+      "weight": 0.0266
     },
     {
-      "doc": "doc 15",
-      "source": "https://arxiv.org/abs/2509.18928v1",
+      "doc": "doc 81",
+      "source": "https://arxiv.org/abs/2604.09487v4",
       "is_seed": false,
-      "title": "Direct Preference Optimization for Speech Autoregressive Diffusion Models",
+      "title": "Sim-to-Real Transfer for Muscle-Actuated Robots via Generalized Actuator Networks",
       "authors": [
-        "Zhijun Liu",
-        "Dongya Jia",
-        "Xiaoqiang Wang"
-      ],
-      "year": 2025,
-      "regime": "language models · reward",
-      "weight": 0.1253
-    },
-    {
-      "doc": "doc 42",
-      "source": "https://arxiv.org/abs/2607.21069v1",
-      "is_seed": false,
-      "title": "From Evaluation to Optimisation: Hierarchy-Aware Training Signals for CWE Prediction in Python",
-      "authors": [
-        "Muntasir Adnan",
-        "Manile Srun",
-        "Carlos C. N. Kuhn"
+        "Jan Schneider",
+        "Mridul Mahajan",
+        "Le Chen"
       ],
       "year": 2026,
-      "regime": "language models · reward",
-      "weight": 0.1004
+      "regime": "Sim2Real-Physics",
+      "weight": 0.0262
+    },
+    {
+      "doc": "doc 14",
+      "source": "https://arxiv.org/abs/2505.14266v1",
+      "is_seed": true,
+      "title": "Sampling-Based System Identification with Active Exploration for Legged Robot Sim2Real Learning",
+      "authors": [
+        "Nikhil Sobanbabu",
+        "Guanqi He",
+        "Tairan He"
+      ],
+      "year": 2025,
+      "regime": "Sim2Real-Physics",
+      "weight": 0.0256
     }
   ],
-  "mixture_entropy_H": 0.9444,
-  "effective_contributing_documents": 13.59,
-  "relative_uncertainty_u": 0.00752
+  "mixture_entropy_H": 0.9166,
+  "effective_contributing_documents": 64.31,
+  "relative_uncertainty_u": 0.469952
 }

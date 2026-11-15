@@ -319,6 +319,186 @@ def build_payload(
         "fields": field_records(grid_data, grid_size, names),
         "field_order": list(FIELD_ORDER),
         "gaps": gaps,
+        "idea": idea_record(paths),
+    }
+
+
+def _number(value: Any, fallback: float = 0.0) -> float:
+    """Coerce a JSON value to a float, tolerating a malformed artifact."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    return number if np.isfinite(number) else fallback
+
+
+def idea_record(paths: Paths) -> dict[str, Any] | None:
+    """Flatten the explorer artifact into what the page draws, or ``None``.
+
+    The overlay is optional by design: without ``src.explore``'s artifact the
+    page is exactly the corpus dashboard. A missing or unreadable file therefore
+    degrades to "no overlay" with a warning, never to a failed build, because
+    the corpus view must remain reproducible on its own.
+    """
+    if not paths.explorer_json.is_file():
+        LOGGER.info("No %s; dashboard shows the corpus only", paths.explorer_json)
+        return None
+    try:
+        artifact = json.loads(paths.explorer_json.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        LOGGER.warning("Ignoring unreadable %s: %s", paths.explorer_json, exc)
+        return None
+    if not isinstance(artifact, dict) or "placement" not in artifact:
+        LOGGER.warning("Ignoring %s: not an explorer artifact", paths.explorer_json)
+        return None
+
+    placement = artifact["placement"]
+    quality = artifact.get("quality", {})
+    scores = artifact.get("scores", {})
+    percentiles = artifact.get("grid_percentiles", {})
+    grid_context = artifact.get("grid_context", {})
+    reference = artifact.get("ideal_distance_reference", {})
+    leave_one_out = placement.get("leave_one_out", {})
+    gaps = [
+        {
+            "rank": int(_number(gap.get("rank"))),
+            "x": _number(gap.get("x")),
+            "y": _number(gap.get("y")),
+            "distance": _number(gap.get("chart_distance")),
+            "ideal_distance": _number(gap.get("ideal_distance")),
+            "archetype": str(gap.get("archetype_label") or ""),
+            "objectives": {
+                str(name): _number(value)
+                for name, value in gap.get("objectives", {}).items()
+            },
+        }
+        for gap in artifact.get("gaps", [])
+        if isinstance(gap, dict)
+    ]
+    terms = artifact.get("terms", {})
+    metadata = artifact.get("metadata", {})
+    front = artifact.get("gap_reference", {}) if isinstance(artifact.get("gap_reference"), dict) else {}
+
+    def frontier_reference(entry: Any) -> dict[str, Any] | None:
+        if not isinstance(entry, dict) or "rank" not in entry:
+            return None
+        return {
+            "rank": int(_number(entry.get("rank"))),
+            "chart_distance": round(_number(entry.get("chart_distance")), 4),
+            "objective_distance": round(_number(entry.get("objective_distance")), 4),
+            "ideal_distance": round(_number(entry.get("ideal_distance")), 4),
+            "archetype": str(entry.get("archetype", "")),
+        }
+
+    insertion = front.get("insertion", {}) if isinstance(front.get("insertion"), dict) else {}
+    dominators = [
+        entry for entry in (front.get("dominated_by") or []) if isinstance(entry, dict)
+    ]
+    dominating = dominators[0] if dominators else None
+
+    # The plain-language block is passed through rather than re-derived: the page
+    # must print the same sentences the report does, and both must be the ones
+    # the artifact recorded, so a reader can check a claim against its number.
+    plain = artifact.get("plain_language", {})
+    plain = plain if isinstance(plain, dict) else {}
+
+    return {
+        "label": str(metadata.get("label", "Idea")),
+        "document": Path(str(metadata.get("document", ""))).name,
+        "x": _number(placement.get("x")),
+        "y": _number(placement.get("y")),
+        "objectives": [
+            {
+                "name": str(name),
+                "value": round(_number(value), 4),
+                "percentile": round(_number(percentiles.get(name)), 1),
+            }
+            for name, value in scores.items()
+        ],
+        "ideal_distance": round(_number(artifact.get("ideal_distance")), 4),
+        "best_gap_ideal": round(_number(reference.get("best_gap")), 4),
+        "grid_median_ideal": round(_number(reference.get("grid_median")), 4),
+        "hypothetical_rank": int(_number(reference.get("hypothetical_rank"))),
+        "candidates": int(_number(reference.get("candidates"))),
+        "placement_error": round(_number(leave_one_out.get("median")), 4),
+        "placement_error_p90": round(_number(leave_one_out.get("p90")), 4),
+        "typical_spacing": round(
+            _number(leave_one_out.get("typical_neighbour_spacing")), 4
+        ),
+        "fit_rmse": round(_number(placement.get("fit_rmse")), 4),
+        "at_chart_edge": bool(placement.get("at_chart_edge", False)),
+        "word_count": int(_number(quality.get("word_count"))),
+        "vocabulary_match": round(_number(quality.get("vocabulary_match_rate")), 4),
+        "nearest_document": str(quality.get("nearest_document", "")),
+        "nearest_similarity": round(_number(quality.get("nearest_similarity")), 4),
+        "nearest_percentile": round(
+            _number(quality.get("nearest_distance_percentile")), 1
+        ),
+        "mean_percentile": round(_number(quality.get("mean_distance_percentile")), 1),
+        "corpus_documents": int(_number(metadata.get("corpus_documents"))),
+        "white_space_plateau_share": round(
+            _number(grid_context.get("white_space_plateau_share")), 4
+        ),
+        "regimes": [
+            {"label": str(label), "share": round(_number(share), 4)}
+            for label, share in artifact.get("regime_mixture", {}).items()
+        ],
+        "nearest_gap": gaps[0] if gaps else None,
+        "gaps": gaps,
+        "neighbours": [
+            {
+                "id": str(neighbour.get("id", "")),
+                "title": str(neighbour.get("title", "")),
+                "regime": str(neighbour.get("regime_label", "")),
+                "chart_distance": round(_number(neighbour.get("chart_distance")), 4),
+                "chart_rank": int(_number(neighbour.get("chart_rank"))),
+                "similarity": round(_number(neighbour.get("cosine_similarity")), 4),
+                "cosine_rank": int(_number(neighbour.get("cosine_rank"))),
+            }
+            for neighbour in artifact.get("neighbours", [])
+            if isinstance(neighbour, dict)
+        ],
+        "novel_terms": [
+            str(entry.get("term", ""))
+            for entry in terms.get("not_in_corpus", [])
+            if isinstance(entry, dict)
+        ],
+        "map_terms": [
+            str(entry.get("term", ""))
+            for entry in terms.get("map_theme_lens", [])
+            if isinstance(entry, dict)
+        ],
+        "warnings": [str(warning) for warning in quality.get("warnings", [])],
+        "plain": {
+            "headline": str(plain.get("headline", "")),
+            "position": str(plain.get("position", "")),
+            "novelty": str(plain.get("novelty", "")),
+            "front": str(plain.get("front", "")),
+            "readings": [
+                {
+                    "name": str(entry.get("name", "")),
+                    "meaning": str(entry.get("meaning", "")),
+                    "reading": str(entry.get("reading", "")),
+                }
+                for entry in (plain.get("objectives") or [])
+                if isinstance(entry, dict)
+            ],
+        },
+        "front": {
+            "nearest_chart": frontier_reference(front.get("nearest_chart")),
+            "nearest_objective": frontier_reference(front.get("nearest_objective")),
+            "on_front": bool(front.get("on_front", False)),
+            "insertion_rank": int(_number(insertion.get("rank"))),
+            "insertion_of": int(_number(insertion.get("of"))),
+            "insertion_before": frontier_reference(
+                insertion.get("before") if isinstance(insertion.get("before"), dict) else None
+            ),
+            "insertion_after": frontier_reference(
+                insertion.get("after") if isinstance(insertion.get("after"), dict) else None
+            ),
+            "dominated_by": frontier_reference(dominating),
+            "dominated_by_count": len(dominators),
+        },
     }
 
 

@@ -9,6 +9,36 @@ invalidates what.
 
 ---
 
+## 0. This repository is topic-parameterised
+
+Nothing in `src/` knows which research topic it is mapping. The topic lives in
+two places only:
+
+- `config.yaml::regimes` — the regime list (any count from 1 up; ids `0..N-1`)
+- `docs/papers/desired/*.pdf` — the seeding papers
+
+So swapping fields is a *data* edit, never a code edit. Retargeting the radar
+from legged locomotion to robot-arm manipulation, or from manipulation to
+anything else, means: new seed PDFs, new regime names/labels/queries, matching
+`seed_overrides`, and the arithmetic in §3.4. `src.embed`, `src.manifold`,
+`src.pareto`, `src.report`, and `src.dashboard` are unchanged and read labels
+off the corpus.
+
+Two profiles are supported and both are documented here:
+
+| Profile | Where documented |
+| --- | --- |
+| `seed_first` — curated PDFs plus a per-regime harvest | §2–§4 |
+| `single_field` — one broad query, regimes discovered from the chart | §5 |
+
+**Regime sets in this file are examples, not assumptions.** The three regimes
+currently in `config.yaml` are one instance of the schema (zero-shot RL,
+sim-to-real/physics, arm manipulation). Treat every regime name, query, seed
+filename, and document count quoted below as an illustration to re-derive from
+the live config, never as a fixture the code depends on.
+
+---
+
 ## 1. The one thing to understand first
 
 **A rebuild does not inherit papers. The corpus is always `seeds + this run's
@@ -55,6 +85,59 @@ selection logic (query, window, exclusion rules), never the cache.
 .venv/bin/python -m src.dashboard                # -> output/index.html
 ```
 
+Optional, and outside the pipeline: placing your own document on the finished
+map. `src.explore` only *reads* the corpus, the grid, the objectives, and the
+front, so it can never move a paper or a gap. It is safe to re-run at any time,
+but the dashboard has to be re-rendered afterwards to pick up the overlay.
+
+```bash
+.venv/bin/python -m src.explore                  # -> data/explorer_idea.json
+                                                 #    output/IDEA_PLACEMENT.md
+.venv/bin/python -m src.dashboard                # overlay appears on output/index.html
+```
+
+Two parts of that artifact are easy to misread, so both the card and the report
+spell them out: `neighbour_views.by_text` / `neighbour_views.by_chart` are the
+same union ordered two ways (the chart is a projection, so its nearest
+neighbour is often not the text-nearest one), and
+`grid_context.white_space_plateau_share` says how much of the grid scores the
+same `W` — `W = 1.000` is a plateau, not a unique position.
+
+The document may be a PDF. `read_document` dispatches on the suffix and runs
+`src.harvest.extract_pdf_text` (mutool + the corpus's own sanitation: headers,
+bibliography, citation call-outs removed, hard line breaks repaired), so a
+proposal's reference list is never embedded as if it were the author's argument.
+The recorded `document_sha256` is the digest of that extracted text, which keeps
+`build_artifact`'s "is this byte-identical to a corpus paper" guard meaningful.
+`metadata.document_format` records which path was taken.
+
+The idea has **no gap rank**, and nothing may imply one. The front is 55 discrete
+candidates ranked by `d_ideal`; an external document is not a candidate, so
+`gap_reference` reports four separate facts instead: `nearest_chart` (projection
+neighbour), `nearest_objective` (the actually similar proposal in P/W/G/S space),
+`insertion` (the slot by `d_ideal`, labelled hypothetical) and
+`dominated_by`/`on_front` (a gap that is at least as high on all four objectives
+keeps the point off the front regardless of `d_ideal`). In the UI, focusing the
+idea hides every `.gap-pane`, so a gap number can never sit under the idea card
+and read as its rank.
+
+`on_front = true` is the one field that must never be reported without
+`placement.calibration_residual_rmse` beside it. Non-domination is a knife-edge
+property of a single 4-D coordinate: on the reference proposal it holds exactly
+at the placed point (0 gaps and 0 of 441 grid points dominate) yet fails at 86%
+of the 400 points sampled inside the residual radius, with a different dominator
+each time. The placement error is larger than the distance to the nearest
+dominating region, so treat the frontier line as "no gap dominates here, at the
+precision of the placement" and say so out loud.
+
+`plain_language` is the reading that sits beside the numbers: fixed thresholds,
+no model. If you change a threshold, the card and `output/IDEA_PLACEMENT.md`
+change together because the page prints the artifact's strings rather than
+re-deriving them.
+
+When this changes, `--verify-only` must keep printing both
+`W plateau share reproduces` and `Front reference reproduces` in its output.
+
 Stages are strictly sequential. Each reads the previous stage's artifact, so a
 partial run leaves downstream files describing an older corpus. **After any
 corpus change, re-run all six.** Do not hand-run `report` on a stale manifold.
@@ -69,6 +152,7 @@ Verify (offline, no network):
 .venv/bin/python -m src.pareto    --verify-only
 .venv/bin/python -m src.report    --verify-only
 .venv/bin/python -m src.dashboard --verify-only
+.venv/bin/python -m src.explore   --verify-only
 node tests/dashboard_smoke.js output/index.html
 /usr/bin/ruff check src/ tests/ && .venv/bin/python -m pytest -q
 ```
@@ -81,12 +165,18 @@ Harvest takes roughly 10-25 minutes (arXiv rate limiting at
 ## 3. Checklist: adding or replacing a seeding paper
 
 Seeds are the only curated input. They anchor the topical neighbourhoods and
-they set the harvest window.
+they set the harvest window. The count is free: any number of seeds works as
+long as §3.4 holds, and a regime may legitimately have zero seeds (its
+neighbourhood then comes only from its query and keywords).
 
-1. **Drop the PDF** into `docs/papers/desired/`.
+1. **Drop the PDF** into `docs/papers/desired/` (the directory named by
+   `corpus.seed_dir` / `fulltext.seeds_dir`). Retired seeds go in a sibling
+directory such as `docs/papers/desired_locomotion/` — the reader uses a
+   non-recursive `*.pdf` glob (`src/harvest.py:2141`), so a sub-directory is
+   invisible and needs no config change.
 2. **Name it well.** A filename beginning with an arXiv ID
    (`2511.04131v1.pdf`) is read directly. A free-form name
-   (`cassie biped.pdf`) forces an exact-title lookup against arXiv, which is
+   (`my paper.pdf`) forces an exact-title lookup against arXiv, which is
    slower and can fail. Prefer the arXiv ID when you have one.
 
    The version suffix is optional: `2511.04131.pdf` and `2511.04131v3.pdf` both
@@ -106,7 +196,8 @@ they set the harvest window.
 4. **Fix the arithmetic.** The build harvests `target_per_regime` papers per
    regime and then requires
    `seed_count + n_regimes × target_per_regime == target_total_papers`.
-   Adding a 16th seed to the current config yields `16 + 3×35 = 121 ≠ 120`, and
+   Adding a 16th seed to a 15-seed / 3-regime / 35-per-regime config yields
+   `16 + 3×35 = 121 ≠ 120`, and
    the run hard-stops (§7) rather than writing 121 documents. Either raise
    `target_total_papers` to the new sum, or lower `target_per_regime` to
    compensate. Update `seed_count` too — `--verify-fulltext` compares it
@@ -341,3 +432,8 @@ happily be built from it.
   measure over the regime partition.
 - **One writer.** Do not run two pipeline stages concurrently; they share
   output paths.
+- **The external document never joins the corpus.** `src.explore` writes only
+  `data/explorer_idea.json` and `output/IDEA_PLACEMENT.md`. If a change would
+  put the document into `corpus.json`, the TF-IDF matrix, the grid, or the
+  front, it is wrong: the overlay exists to be measured *against* the map, not
+  to change it.

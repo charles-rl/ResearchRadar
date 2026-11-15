@@ -172,8 +172,11 @@ run's harvest, never papers inherited from an earlier corpus.
    start, then constrained stress minimisation with **9 gauge anchors** (8
    perimeter + 1 central). Coordinates are frozen afterwards.
 2. **Grid.** 441 points, spacing 0.1, `x`-major ordering.
-3. **SPH weights.** `w_i(x) = exp(-||x - x_i||^2 / (2 h^2))`, `h = 0.25` globally,
-   plus an adaptive field with `h_i` = the document's 8th-neighbour distance.
+3. **SPH weights.** Cubic-spline kernel `W(q)` of Eq. 10 with `q = ||x - x_i||/h`,
+   normalised as `w_i = W(q_i)/Σ_j W(q_j)` (Eq. 11). The global field derives
+   `h(x) = max_i ||x - x_i|| / 1.98` at every query point (Eq. 9), so all `N`
+   documents contribute; the adaptive field uses `h_i = d8_i / 1.98`, which puts
+   each document's 8th neighbour just inside the kernel support.
 4. **`P_boundary` — three views, harmonic mean (§4.2):**
 
    ```text
@@ -187,7 +190,9 @@ run's harvest, never papers inherited from an earlier corpus.
 5. **`W` — band-pass white space (§3.4).** Zero below `q20` and above `q98`, a
    linear ramp to 1.0 at `q60`, flat 1.0 through `q85`, ramping down to `q98`.
 6. **`G` — semantic gradient (§3.5).** `v(x) = normalize(Σ w_i(x) z_i)`, then
-   `g(x) = ||J_v||_F` by **central differences of `v`**, `G = N+(g)`.
+   `g(x) = ||J_v||_F` by **central differences of `v`** at `δ = 1e-3` (Eq. 14),
+   evaluated through the Gram identity so the 250k-dimensional field is never
+   materialised; `G = N+(g)`.
 7. **`S` — evidential support (§3.6).**
    `S = 0.40 N+(N_eff) + 0.30 N-(d5) + 0.30 N-(T3)`.
 8. **`R` — reliability diagnostic (§3.7).** `0.5 N-(u_RBF) + 0.5 N-(u_M32)` from

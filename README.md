@@ -3,7 +3,8 @@
 A research-landscape radar for robotics control: a 1:1 reproduction of
 Obayashi et al. (2026), *Knowledge Manifold Optimization*, applied to robotics.
 
-The pipeline harvests an arXiv corpus across three research regimes, extracts
+The pipeline harvests an arXiv corpus across three configurable research
+regimes, extracts
 full text, builds a sparse character n-gram TF-IDF representation, projects the
 corpus onto a bounded 2-D chart, and scores every grid location on boundary
 pressure, band-pass whitespace, semantic gradient, and evidential support. The
@@ -56,12 +57,15 @@ Applies to `profile: seed_first`.
 | ID | Label | Query |
 | --- | --- | --- |
 | 0 | Zero-Shot RL & Predictive Representations | `(abs:"zero-shot" OR abs:"forward-backward" OR abs:"latent dynamics" OR abs:"successor feature") AND abs:"reinforcement learning" AND (cat:cs.RO OR cat:cs.LG)` |
-| 1 | Sim-to-Real & Hardware Physics Adaptation | `(abs:"sim-to-real" OR abs:"domain randomization") AND (abs:"friction" OR abs:"actuator" OR abs:"legged" OR abs:"system identification") AND cat:cs.RO` |
-| 2 | Dynamic Legged Control & Trajectory Optimization | `(abs:"bipedal" OR abs:"legged" OR abs:"cassie") AND (abs:"feedback control" OR abs:"walking" OR abs:"cma-es" OR abs:"virtual constraints") AND (cat:cs.RO OR cat:eess.SY)` |
+| 1 | Sim-to-Real & Hardware Physics Adaptation | `(abs:"sim-to-real" OR abs:"domain randomization") AND (abs:"friction" OR abs:"actuator" OR abs:"contact dynamics" OR abs:"contact-rich" OR abs:"system identification") AND cat:cs.RO` |
+| 2 | Robot Arm Manipulation & Vision-Language-Action Policies | `(abs:"robot manipulation" OR abs:"dexterous manipulation" OR abs:"robotic grasping" OR abs:"vision-language-action") AND (abs:"manipulation policy" OR abs:"imitation learning" OR abs:"reinforcement learning" OR abs:"policy learning" OR abs:"sim-to-real") AND cat:cs.RO` |
 
 35 harvested papers per regime, plus the 15 seeding papers, 120 documents total.
 The regimes are defined entirely by `config.yaml`; nothing downstream assumes the
-labels above, so a taxonomy change is a config edit plus a re-harvest.
+labels above, so a taxonomy change is a config edit plus a re-harvest. Regime 2
+was previously "Dynamic Legged Control & Trajectory Optimization"; its seeding
+papers are archived in `docs/papers/desired_locomotion/` (outside the
+non-recursive seed glob, so they are inert).
 
 ## Seeding papers (Seed-First Expansion)
 
@@ -88,7 +92,7 @@ Three things follow from the seeds:
 
 Each seed is placed in a regime by this priority:
 
-1. `corpus.seed_overrides` in `config.yaml` — `{"TD JEPA.pdf": 2}`.
+1. `corpus.seed_overrides` in `config.yaml` — `{"2511.04131.pdf": 0}`.
 2. Otherwise, the regime whose centroid (its harvested documents plus its keyword
    bundle) is closest in TF-IDF cosine similarity. The cosine and the margin are
    logged for every seed, and a margin below `corpus.seed_match_margin` is
@@ -117,6 +121,11 @@ PIP_CONFIG_FILE=/dev/null .venv/bin/pip install --isolated \
                                      #    output/KMO_PROMPT_TOP1.txt
 .venv/bin/python -m src.dashboard    # -> output/index.html (standalone app)
 
+# optional: place one external document of your own on the finished map
+.venv/bin/python -m src.explore      # -> data/explorer_idea.json
+                                     #    output/IDEA_PLACEMENT.md
+.venv/bin/python -m src.dashboard    # re-render to overlay it on the page
+
 # after an LLM answers output/KMO_PROMPT_TOP1.txt:
 .venv/bin/python -m src.audit --input response.txt --gap 1
 ```
@@ -131,6 +140,7 @@ Every module supports offline re-verification:
 .venv/bin/python -m src.pareto   --verify-only
 .venv/bin/python -m src.report   --verify-only
 .venv/bin/python -m src.dashboard --verify-only
+.venv/bin/python -m src.explore   --verify-only
 node tests/dashboard_smoke.js output/index.html
 ```
 
@@ -318,6 +328,121 @@ Screenshot at 1600x950, 1440x820, 1024x768 and 430x900. The narrower widths are
 what catch layout drift: the map's grid row and the header metric strip both
 broke silently at 1600px alone.
 
+## Placing your own document on the map
+
+`src/explore.py` answers a different question from the rest of the pipeline:
+*given this map, where does my idea sit, and is it novel?* It takes one document
+from outside the corpus, represents it with the same character n-gram TF-IDF, and
+projects it onto the finished manifold. Nothing is recomputed: the corpus, the
+discovery grid, the four objectives, and the Pareto front are read-only inputs,
+so the overlay can never move a paper, a field, or a gap.
+
+```yaml
+explorer:
+  document: docs/papers/Current_Research_Proposal.pdf  # UTF-8 text or a PDF
+  label: Your proposal                    # legend/drawer label
+  output_path: data/explorer_idea.json
+  report_path: output/IDEA_PLACEMENT.md
+```
+
+A PDF is read through the corpus's own `mutool` extraction and sanitation chain
+(`src.harvest.extract_pdf_text`), not as raw bytes: running headers, the
+bibliography and citation call-outs are dropped and the hard line breaks a PDF
+text layer leaves mid-sentence are repaired. That matters because a proposal's
+reference list is full of *other papers' titles* — embedding it would score the
+bibliography as if it were the author's argument. The digest recorded in the
+artifact is taken over the extracted text, so the "is this byte-identical to a
+corpus paper" guard keeps working for both input types. A scanned PDF with no
+text layer fails loudly instead of scoring an empty document.
+
+What the module does, in order:
+
+1. **Represent** the document with the corpus vocabulary (markdown and LaTeX
+   noise stripped first, and a PDF sanitized as described above). The share of its
+   n-grams the corpus vocabulary knows is
+   reported as `vocabulary_match_rate` — low values mean the document is talking
+   about something the corpus does not, which is itself a novelty signal.
+2. **Place** it on `[-1, 1]^2`. Raw cosine similarity cannot be trilaterated
+   directly (the chart's distances are MDS distances, not text distances), so the
+   module first fits an isotonic map *cosine distance → chart distance* on all
+   corpus pairs, then solves a bounded least-squares trilateration against the
+   calibrated distances. The isotonic fit is validated by leave-one-out: the
+   reported median/p90 position error is the honest uncertainty of the placement,
+   in chart units, next to the typical nearest-neighbour spacing for scale.
+   `at_chart_edge` and a warning fire when the fit runs into the boundary or the
+   residual exceeds that calibration error.
+3. **Score** the point with the same four objectives used for the grid
+   (`P_boundary`, `W`, `G`, `S`), plus the percentile of each value among all
+   candidates, `d_ideal`, and the rank the point *would* take — reported as a
+   hypothetical, because an external document is not a front candidate.
+4. **Read the neighbourhood**: nearest corpus documents *twice* — once ranked by
+   text similarity (cosine, what the document is about) and once ranked by chart
+   distance (where the projection puts it). The chart is a 2-D projection, so its
+   nearest neighbour is often not the text-nearest one: in the reference run the
+   closest paper was text rank 1 but chart rank 26, and showing only the chart
+   order hid it entirely (text rank 1, chart rank 25 in the reference run). The card and the report therefore list both orderings,
+   each with the other rank attached. Also reported: the nearest practical gaps,
+   the regime mixture at that point, and two term lists — words the document leans
+   on that the corpus barely covers (`df <= 3`, i.e. candidate novelty) and words
+   shared with the map's own theme lens.
+
+**The idea has no gap rank.** The front is a finite set of *candidates* ranked by
+`d_ideal`, and an external document is not one of them, so interleaving it into
+that ranking would be arithmetic pretending to be membership. `gap_reference`
+reports four facts instead, and the card shows all four:
+
+- `nearest_chart` — the gap nearest on the map. A projection neighbour, not a
+  similarity claim: in the reference run gap #50 is 0.108 chart units away but
+  1.261 away in `d_ideal`, i.e. farther than the idea itself (1.052).
+- `nearest_objective` — the gap nearest in the four-objective space. This is the
+  proposal the idea is actually similar to; the 2-D chart frequently puts it far
+  away (gap #24, Δ 0.103, at 0.53 chart units).
+- `insertion` — the slot the point would take if inserted by `d_ideal`
+  (#25 of 56 in the reference run), explicitly labelled hypothetical.
+- `dominated_by` / `on_front` — the decisive one. A gap that scores at least as
+  high on all four objectives dominates the point, and a dominated point cannot
+  be on the front however good its `d_ideal` looks. In the reference run no gap
+  and none of the 441 grid points dominates the proposal on all four, so at that
+  coordinate it would join the front — and it strictly dominates gaps #35 and
+  #44. **Read that as fragile, not as a result.** The placement's own error
+  (residual 0.255 chart units, leave-one-out median 0.189) is larger than the
+  distance to the nearest dominating region: sampling 400 points inside the
+  residual radius, 86% are dominated by *some* gap, and the dominator changes
+  from sample to sample (#26, #25, #39, #36, #43, #2, #1, #13 all appear). A
+  four-axis non-domination verdict is not stable at the precision this placement
+  has, so the report prints the frontier fact and the residual next to it.
+
+`W` needs one caveat next to its value. The band-pass (Eq. 12) saturates between
+`q60` and `q85`, so `W = 1.000` is the score of a wide plateau, not a unique
+position: `grid_context.white_space_plateau_share` reports the share of grid
+points that score the same (25.6% of 441 in the reference run), and both the card
+and the report print it beside the value. A plateau score means the nearest
+document is at a healthy distance; it does not mean the idea sits somewhere
+special.
+
+Deliberately absent: a verdict. The module reports numbers and percentiles and
+stops there. Whether "novel enough" matters is a judgement the map cannot make,
+and `output/IDEA_PLACEMENT.md` is written to be read next to the page.
+
+`plain_language` sits beside the numbers rather than replacing them. It turns
+four scores into sentences using fixed thresholds (no model, no generation), so
+every claim can be checked against the value printed next to it: what the
+position is (`P_boundary` 57th = near a seam, not on it), what the novelty
+evidence actually is (mean text-distance percentile 6.7, not the saturated `W`),
+and what front membership does and does not mean (no gap dominates on all four
+at this exact coordinate, which says where unexplored combinations score higher,
+not whether the work is publishable).
+The card and the report print the same sentences, because the page passes the
+artifact's strings through instead of re-deriving them.
+
+On the dashboard the result is a cyan diamond labelled *your idea*, distinct
+from the paper dots and the gap stars, with a card at the top of the drawer
+(click the marker or press `i`). Focusing the idea replaces the gap panes with
+that one card, so no gap number can sit under it and read as the idea's rank; the
+card's button (or `Esc`, or any arrow key) returns to the selected gap. The
+overlay is optional: without `data/explorer_idea.json` the page is exactly the
+corpus dashboard, and `tests/dashboard_smoke.js` passes in both states.
+
 ## Auditing an LLM answer (Appendix A.2)
 
 The prompt in `output/KMO_PROMPT_TOP1.txt` is meant to be pasted into a language
@@ -365,6 +490,7 @@ src/manifold.py                   MDS, discovery grid, the four KMO objectives
 src/pareto.py                     exact dominance, practical front, archetypes
 src/report.py                     Plotly map, Markdown report, LLM prompt
 src/dashboard.py                  standalone output/index.html generator
+src/explore.py                    places one external document on the map
 src/audit.py                      Appendix A.2 checklist for LLM output
 templates/dashboard.html          the page shell and its inline app script
 tests/test_sanitize.py            bibliography and citation strippers
@@ -381,5 +507,7 @@ data/corpus_fulltext.json         sanitised full text (committed)
 data/sparse_tfidf.npz             Z_l2 and Z_l1 (git-ignored)
 data/tfidf_vocab.json             n-gram terms and whole-word families
 data/manifold_grid.npz            grid coordinates and objective matrix
+data/explorer_idea.json           external document placement (never an input)
+output/IDEA_PLACEMENT.md          the same placement as a readable report
 output/                           rendered artifacts (HTML git-ignored)
 ```

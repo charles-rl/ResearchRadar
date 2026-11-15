@@ -1,0 +1,1251 @@
+{
+  "metadata": {
+    "stage": "explorer",
+    "purpose": "Place an external document on the finished chart without altering the corpus, the embedding, the chart, or the front.",
+    "reference": "Obayashi et al. (2026) Knowledge Manifold Optimization, Eqs. 6-21 evaluated out of sample",
+    "label": "Your proposal",
+    "document": "docs/papers/Current_Research_Proposal.md",
+    "document_format": ".md",
+    "document_sha256": "ae3db032ea7ddcc313ee3542cd51979f8016bdfcc11075be29a6395b06fa37b8",
+    "chart_stress": 0.1429,
+    "chart_distance_correlation": 0.6728,
+    "corpus_documents": 120,
+    "grid_size": 21,
+    "objective_names": [
+      "P_boundary",
+      "W",
+      "G",
+      "S"
+    ],
+    "scoring": "identical kernels, bandwidths and percentile bounds as manifold_grid.npz; nothing is refitted",
+    "placement": "isotonic cosine-to-chart distance calibration plus bounded least-squares trilateration",
+    "profile": "seed_first",
+    "distance_quantiles": {
+      "q20": 0.04789273066456751,
+      "q60": 0.08762156762726067,
+      "q85": 0.1280624847486568,
+      "q98": 0.30303396627550044
+    }
+  },
+  "quality": {
+    "title": "Your proposal",
+    "word_count": 1996,
+    "char_count": 15435,
+    "character_share_of_raw": 0.8486,
+    "n_grams_total": 13415,
+    "n_grams_in_vocabulary": 11556,
+    "vocabulary_match_rate": 0.8614,
+    "mean_cosine_distance": 1.2308,
+    "mean_distance_percentile": 5.8,
+    "nearest_document": "2505.14266v1",
+    "nearest_similarity": 0.3712,
+    "nearest_distance": 1.1215,
+    "nearest_distance_percentile": 25.0,
+    "corpus_neighbour_distance_median": 1.0961,
+    "corpus_neighbour_distance_max": 1.1949,
+    "warnings": [
+      "Placement residual is larger than the calibration's own error (0.438 chart units)."
+    ]
+  },
+  "placement": {
+    "x": -0.804537,
+    "y": 0.973178,
+    "fit_rmse": 0.4384,
+    "fit_spearman": 0.6406,
+    "at_chart_edge": false,
+    "calibration_residual_rmse": 0.3363,
+    "leave_one_out": {
+      "median": 0.3565,
+      "p90": 0.5845,
+      "max": 0.865,
+      "typical_neighbour_spacing": 1.0052,
+      "documents": 120,
+      "calibration_residual_rmse": 0.3363
+    }
+  },
+  "scores": {
+    "P_boundary": 0.244455,
+    "W": 0.444983,
+    "G": 0.0,
+    "S": 0.020837
+  },
+  "grid_percentiles": {
+    "P_boundary": 31.7,
+    "W": 38.3,
+    "G": 0.0,
+    "S": 5.7
+  },
+  "plain_language": {
+    "headline": "Thinly supported corner of the map inside a single field, with textual isolation rather than white space as its novelty evidence.",
+    "objectives": [
+      {
+        "name": "P_boundary",
+        "value": 0.2445,
+        "percentile": 31.7,
+        "meaning": "border strength: 1 = a hard seam between literatures, 0 = inside one literature",
+        "reading": "there is a boundary near you but you are not on it, and the clusterings disagree about where it runs"
+      },
+      {
+        "name": "W",
+        "value": 0.445,
+        "percentile": 38.3,
+        "meaning": "white space: band-pass on the distance to the nearest paper, so 0 can mean incremental or unsupported and 1 means the healthy window between them",
+        "reading": "middle distance to the nearest paper: the space is partly occupied"
+      },
+      {
+        "name": "G",
+        "value": 0.0,
+        "percentile": 0.0,
+        "meaning": "gradient: how fast the map's topics change around this point",
+        "reading": "the surrounding literature is uniform, so this area is saturated with similar work"
+      },
+      {
+        "name": "S",
+        "value": 0.0208,
+        "percentile": 5.7,
+        "meaning": "support: how much corpus evidence sits nearby to build on",
+        "reading": "thin support: fewer papers to build on, so claims here rest on less prior art"
+      }
+    ],
+    "position": "The local mixture is Sim2Real-Physics at 77%. The objectives put you inside a single literature, so the contribution has to be read as depth in that field rather than a bridge between two.",
+    "novelty": "Novelty rests on the text distances, not on W. Mean distance to the corpus 1.231 (6% of corpus documents are further), nearest 1.121 (25%). In plain words: the document is more isolated than almost every paper in the corpus, so it is not a paraphrase of anything already on the map. 86% of its wording is corpus vocabulary, so the position is earned inside this map rather than imported from another field.",
+    "front": "As a front candidate this position would not earn a slot: gap #1 (Archetype A) scores higher on P_boundary, W, G, S -- P_boundary 0.891 vs 0.244, W 1.000 vs 0.445, G 0.835 vs 0.000, S 0.946 vs 0.021. That compares positions on four axes; it does not say the work is weak, and most published papers are not front points either.",
+    "note": "Every sentence is selected from the artifact's own values by fixed thresholds; nothing is generated. Percentiles are shares of the evaluation grid, not of published papers."
+  },
+  "grid_context": {
+    "candidates": 441,
+    "white_space_plateau_share": 0.2517,
+    "white_space_plateau_epsilon": 0.0001,
+    "note": "W saturates between q60 and q85, so this share of the grid scores the same value; a plateau score is a healthy distance, not a unique position."
+  },
+  "ideal_distance": 1.684533,
+  "ideal_distance_reference": {
+    "best_gap": 0.205355,
+    "grid_median": 1.229019,
+    "hypothetical_rank": 403,
+    "candidates": 441,
+    "note": "Hypothetical only: the idea is not a candidate and does not enter the Pareto search."
+  },
+  "diagnostics": {
+    "boundary_views": {
+      "k5_global": {
+        "boundary": 0.155042,
+        "entropy_H": 0.716386,
+        "dominant_gap": 0.160494,
+        "cluster_mixture": [
+          0.4983,
+          0.3378,
+          0.0169,
+          0.0425,
+          0.1045
+        ]
+      },
+      "k8_global": {
+        "boundary": 0.543669,
+        "entropy_H": 0.717852,
+        "dominant_gap": 0.039045,
+        "cluster_mixture": [
+          0.0309,
+          0.0325,
+          0.3273,
+          0.2683,
+          0.0079,
+          0.0376,
+          0.2883,
+          0.0071
+        ]
+      },
+      "k8_adaptive": {
+        "boundary": 0.251069,
+        "entropy_H": 0.15665,
+        "dominant_gap": 0.857698,
+        "cluster_mixture": [
+          0.0614,
+          0.0,
+          0.0195,
+          0.9191,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "mixtures": {},
+    "d_nn": 0.22517467219035292,
+    "n_eff": 53.00717228112036,
+    "d5": 0.35750791031599416,
+    "top3": 0.09483351798805775,
+    "gradient_raw": 0.22921454969450542,
+    "regime_mixture": [
+      0.0825,
+      0.7669,
+      0.1506
+    ]
+  },
+  "regime_mixture": {
+    "ZeroShot-Rep": 0.0825,
+    "Sim2Real-Physics": 0.7669,
+    "Arm-Manipulation": 0.1506
+  },
+  "gaps": [
+    {
+      "rank": 14,
+      "grid_index": 182,
+      "x": -0.2,
+      "y": 0.4,
+      "chart_distance": 0.8331,
+      "objectives": {
+        "P_boundary": 0.637271,
+        "W": 1.0,
+        "G": 0.862129,
+        "S": 0.734064
+      },
+      "ideal_distance": 0.470428,
+      "archetype_id": 5,
+      "archetype_label": "Archetype F",
+      "archetype_size": 2
+    },
+    {
+      "rank": 17,
+      "grid_index": 160,
+      "x": -0.3,
+      "y": 0.3,
+      "chart_distance": 0.8413,
+      "objectives": {
+        "P_boundary": 0.593937,
+        "W": 1.0,
+        "G": 0.925938,
+        "S": 0.673917
+      },
+      "ideal_distance": 0.526025,
+      "archetype_id": 5,
+      "archetype_label": "Archetype F",
+      "archetype_size": 2
+    },
+    {
+      "rank": 9,
+      "grid_index": 225,
+      "x": 0.0,
+      "y": 0.5,
+      "chart_distance": 0.9334,
+      "objectives": {
+        "P_boundary": 0.769376,
+        "W": 0.713069,
+        "G": 0.811985,
+        "S": 0.954903
+      },
+      "ideal_distance": 0.415813,
+      "archetype_id": 0,
+      "archetype_label": "Archetype A",
+      "archetype_size": 7
+    }
+  ],
+  "gap_reference": {
+    "nearest_chart": {
+      "rank": 14,
+      "chart_distance": 0.8331,
+      "objective_distance": 1.3093,
+      "ideal_distance": 0.470428,
+      "objectives": {
+        "P_boundary": 0.637271,
+        "W": 1.0,
+        "G": 0.862129,
+        "S": 0.734064
+      },
+      "archetype": "Archetype F"
+    },
+    "nearest_objective": {
+      "rank": 27,
+      "chart_distance": 1.5924,
+      "objective_distance": 1.0994,
+      "ideal_distance": 1.199653,
+      "objectives": {
+        "P_boundary": 0.168991,
+        "W": 0.27741,
+        "G": 0.525137,
+        "S": 0.969013
+      },
+      "archetype": "Archetype H"
+    },
+    "insertion": {
+      "rank": 29,
+      "of": 29,
+      "before": {
+        "rank": 28,
+        "ideal_distance": 1.210785
+      },
+      "after": null
+    },
+    "dominated_by": [
+      {
+        "rank": 1,
+        "chart_distance": 1.0208,
+        "objective_distance": 1.5095,
+        "ideal_distance": 0.205355,
+        "objectives": {
+          "P_boundary": 0.890638,
+          "W": 1.0,
+          "G": 0.83477,
+          "S": 0.946057
+        },
+        "archetype": "Archetype A"
+      },
+      {
+        "rank": 2,
+        "chart_distance": 1.1104,
+        "objective_distance": 1.4549,
+        "ideal_distance": 0.242101,
+        "objectives": {
+          "P_boundary": 0.926886,
+          "W": 0.973528,
+          "G": 0.823686,
+          "S": 0.85344
+        },
+        "archetype": "Archetype A"
+      },
+      {
+        "rank": 3,
+        "chart_distance": 1.2016,
+        "objective_distance": 1.4482,
+        "ideal_distance": 0.272097,
+        "objectives": {
+          "P_boundary": 0.904915,
+          "W": 1.0,
+          "G": 0.767939,
+          "S": 0.894437
+        },
+        "archetype": "Archetype A"
+      },
+      {
+        "rank": 4,
+        "chart_distance": 1.7014,
+        "objective_distance": 1.4069,
+        "ideal_distance": 0.347159,
+        "objectives": {
+          "P_boundary": 0.776475,
+          "W": 0.973664,
+          "G": 0.947789,
+          "S": 0.740893
+        },
+        "archetype": "Archetype B"
+      },
+      {
+        "rank": 5,
+        "chart_distance": 1.2092,
+        "objective_distance": 1.5006,
+        "ideal_distance": 0.36247,
+        "objectives": {
+          "P_boundary": 0.995145,
+          "W": 1.0,
+          "G": 1.0,
+          "S": 0.637563
+        },
+        "archetype": "Archetype C"
+      },
+      {
+        "rank": 6,
+        "chart_distance": 1.0716,
+        "objective_distance": 1.4068,
+        "ideal_distance": 0.36581,
+        "objectives": {
+          "P_boundary": 0.89838,
+          "W": 1.0,
+          "G": 0.657485,
+          "S": 0.921424
+        },
+        "archetype": "Archetype A"
+      },
+      {
+        "rank": 7,
+        "chart_distance": 1.6443,
+        "objective_distance": 1.382,
+        "ideal_distance": 0.402302,
+        "objectives": {
+          "P_boundary": 0.762133,
+          "W": 0.84518,
+          "G": 1.0,
+          "S": 0.714873
+        },
+        "archetype": "Archetype B"
+      },
+      {
+        "rank": 8,
+        "chart_distance": 1.8413,
+        "objective_distance": 1.3256,
+        "ideal_distance": 0.40982,
+        "objectives": {
+          "P_boundary": 0.963397,
+          "W": 0.935469,
+          "G": 0.683016,
+          "S": 0.751063
+        },
+        "archetype": "Archetype D"
+      },
+      {
+        "rank": 9,
+        "chart_distance": 0.9334,
+        "objective_distance": 1.3708,
+        "ideal_distance": 0.415813,
+        "objectives": {
+          "P_boundary": 0.769376,
+          "W": 0.713069,
+          "G": 0.811985,
+          "S": 0.954903
+        },
+        "archetype": "Archetype A"
+      },
+      {
+        "rank": 10,
+        "chart_distance": 1.6113,
+        "objective_distance": 1.3769,
+        "ideal_distance": 0.434559,
+        "objectives": {
+          "P_boundary": 0.870595,
+          "W": 0.696953,
+          "G": 0.977147,
+          "S": 0.717623
+        },
+        "archetype": "Archetype B"
+      },
+      {
+        "rank": 11,
+        "chart_distance": 0.9878,
+        "objective_distance": 1.3636,
+        "ideal_distance": 0.445067,
+        "objectives": {
+          "P_boundary": 0.789004,
+          "W": 0.732274,
+          "G": 1.0,
+          "S": 0.713838
+        },
+        "archetype": "Archetype A"
+      },
+      {
+        "rank": 12,
+        "chart_distance": 1.1566,
+        "objective_distance": 1.4676,
+        "ideal_distance": 0.452579,
+        "objectives": {
+          "P_boundary": 0.945939,
+          "W": 0.587494,
+          "G": 1.0,
+          "S": 0.821832
+        },
+        "archetype": "Archetype A"
+      },
+      {
+        "rank": 13,
+        "chart_distance": 1.261,
+        "objective_distance": 1.3484,
+        "ideal_distance": 0.460812,
+        "objectives": {
+          "P_boundary": 0.920034,
+          "W": 1.0,
+          "G": 0.562446,
+          "S": 0.879588
+        },
+        "archetype": "Archetype E"
+      },
+      {
+        "rank": 14,
+        "chart_distance": 0.8331,
+        "objective_distance": 1.3093,
+        "ideal_distance": 0.470428,
+        "objectives": {
+          "P_boundary": 0.637271,
+          "W": 1.0,
+          "G": 0.862129,
+          "S": 0.734064
+        },
+        "archetype": "Archetype F"
+      },
+      {
+        "rank": 15,
+        "chart_distance": 1.2935,
+        "objective_distance": 1.3482,
+        "ideal_distance": 0.481923,
+        "objectives": {
+          "P_boundary": 0.641651,
+          "W": 0.900501,
+          "G": 1.0,
+          "S": 0.69351
+        },
+        "archetype": "Archetype C"
+      },
+      {
+        "rank": 16,
+        "chart_distance": 1.041,
+        "objective_distance": 1.3466,
+        "ideal_distance": 0.509658,
+        "objectives": {
+          "P_boundary": 0.831856,
+          "W": 1.0,
+          "G": 0.520219,
+          "S": 0.964089
+        },
+        "archetype": "Archetype E"
+      },
+      {
+        "rank": 17,
+        "chart_distance": 0.8413,
+        "objective_distance": 1.3092,
+        "ideal_distance": 0.526025,
+        "objectives": {
+          "P_boundary": 0.593937,
+          "W": 1.0,
+          "G": 0.925938,
+          "S": 0.673917
+        },
+        "archetype": "Archetype F"
+      },
+      {
+        "rank": 18,
+        "chart_distance": 1.9222,
+        "objective_distance": 1.2512,
+        "ideal_distance": 0.528418,
+        "objectives": {
+          "P_boundary": 0.94695,
+          "W": 1.0,
+          "G": 0.614626,
+          "S": 0.642372
+        },
+        "archetype": "Archetype D"
+      },
+      {
+        "rank": 19,
+        "chart_distance": 1.2351,
+        "objective_distance": 1.2994,
+        "ideal_distance": 0.561291,
+        "objectives": {
+          "P_boundary": 0.911916,
+          "W": 0.87769,
+          "G": 0.462883,
+          "S": 0.938078
+        },
+        "archetype": "Archetype E"
+      },
+      {
+        "rank": 20,
+        "chart_distance": 1.3198,
+        "objective_distance": 1.2755,
+        "ideal_distance": 0.602435,
+        "objectives": {
+          "P_boundary": 0.45335,
+          "W": 0.90371,
+          "G": 0.870993,
+          "S": 0.804587
+        },
+        "archetype": "Archetype G"
+      },
+      {
+        "rank": 21,
+        "chart_distance": 1.0194,
+        "objective_distance": 1.1737,
+        "ideal_distance": 0.774122,
+        "objectives": {
+          "P_boundary": 0.788454,
+          "W": 0.551674,
+          "G": 0.40607,
+          "S": 0.972363
+        },
+        "archetype": "Archetype E"
+      },
+      {
+        "rank": 22,
+        "chart_distance": 1.5277,
+        "objective_distance": 1.1456,
+        "ideal_distance": 0.943361,
+        "objectives": {
+          "P_boundary": 0.37312,
+          "W": 1.0,
+          "G": 0.295704,
+          "S": 0.969713
+        },
+        "archetype": "Archetype H"
+      }
+    ],
+    "on_front": false,
+    "note": "Hypothetical only: the point is not a candidate. Insertion into the d_ideal ordering is arithmetic, not front membership; a gap that dominates it on all four objectives would keep it off the front."
+  },
+  "neighbours": [
+    {
+      "id": "2603.12185v2",
+      "title": "ComFree-Sim: A GPU-Parallelized Analytical Contact Physics Engine for Scalable Contact-Rich Robotics Simulation and Control",
+      "regime_id": 1,
+      "regime_label": "Sim2Real-Physics",
+      "year": 2026,
+      "chart_distance": 0.2252,
+      "chart_rank": 0,
+      "cosine_similarity": 0.222,
+      "cosine_rank": 86,
+      "is_seed": false,
+      "url": ""
+    },
+    {
+      "id": "2608.03116v2",
+      "title": "Shooting for Contact: Contact-Implicit Multiple Shooting for Dynamic Motion Retargeting",
+      "regime_id": 1,
+      "regime_label": "Sim2Real-Physics",
+      "year": 2026,
+      "chart_distance": 0.2566,
+      "chart_rank": 1,
+      "cosine_similarity": 0.2586,
+      "cosine_rank": 33,
+      "is_seed": false,
+      "url": ""
+    },
+    {
+      "id": "2507.23445v1",
+      "title": "Quantifying and Visualizing Sim-to-Real Gaps: Physics-Guided Regularization for Reproducibility",
+      "regime_id": 1,
+      "regime_label": "Sim2Real-Physics",
+      "year": 2025,
+      "chart_distance": 0.2987,
+      "chart_rank": 2,
+      "cosine_similarity": 0.2696,
+      "cosine_rank": 23,
+      "is_seed": false,
+      "url": ""
+    },
+    {
+      "id": "2602.21583v2",
+      "title": "Learning End-to-End Control for Omnidirectional Aerial Motion on Overactuated Tilt-rotor Quadrotors",
+      "regime_id": 1,
+      "regime_label": "Sim2Real-Physics",
+      "year": 2026,
+      "chart_distance": 0.327,
+      "chart_rank": 3,
+      "cosine_similarity": 0.2672,
+      "cosine_rank": 25,
+      "is_seed": false,
+      "url": ""
+    },
+    {
+      "id": "2607.02205v2",
+      "title": "Actuator Reality Shaping for Zero-Shot Sim-to-Real Robot Learning",
+      "regime_id": 1,
+      "regime_label": "Sim2Real-Physics",
+      "year": 2026,
+      "chart_distance": 0.3575,
+      "chart_rank": 4,
+      "cosine_similarity": 0.293,
+      "cosine_rank": 5,
+      "is_seed": false,
+      "url": ""
+    },
+    {
+      "id": "2606.20712v1",
+      "title": "Real-World Deployment of Massively Parallel Sampling-Based MPC for Contact-Rich Manipulation",
+      "regime_id": 1,
+      "regime_label": "Sim2Real-Physics",
+      "year": 2026,
+      "chart_distance": 0.3822,
+      "chart_rank": 5,
+      "cosine_similarity": 0.2798,
+      "cosine_rank": 13,
+      "is_seed": false,
+      "url": ""
+    },
+    {
+      "id": "2306.11171v3",
+      "title": "Sim-to-real transfer of active suspension control using deep reinforcement learning",
+      "regime_id": 1,
+      "regime_label": "Sim2Real-Physics",
+      "year": 2023,
+      "chart_distance": 0.4608,
+      "chart_rank": 6,
+      "cosine_similarity": 0.2518,
+      "cosine_rank": 43,
+      "is_seed": false,
+      "url": ""
+    },
+    {
+      "id": "2509.21690v5",
+      "title": "PACE: Physics Augmentation for Coordinated End-to-end Reinforcement Learning toward Versatile Humanoid Table Tennis",
+      "regime_id": 0,
+      "regime_label": "ZeroShot-Rep",
+      "year": 2025,
+      "chart_distance": 0.4805,
+      "chart_rank": 7,
+      "cosine_similarity": 0.257,
+      "cosine_rank": 34,
+      "is_seed": false,
+      "url": ""
+    },
+    {
+      "id": "2503.01255v1",
+      "title": "Impact of Static Friction on Sim2Real in Robotic Reinforcement Learning",
+      "regime_id": 1,
+      "regime_label": "Sim2Real-Physics",
+      "year": 2025,
+      "chart_distance": 0.6336,
+      "chart_rank": 14,
+      "cosine_similarity": 0.2872,
+      "cosine_rank": 6,
+      "is_seed": true,
+      "url": ""
+    },
+    {
+      "id": "2609.17832v1",
+      "title": "Adaptive-MHE : A Sampling-Based Adaptive MPC for Legged Loco-Manipulation via Moving Horizon Estimation",
+      "regime_id": 1,
+      "regime_label": "Sim2Real-Physics",
+      "year": 2026,
+      "chart_distance": 0.7791,
+      "chart_rank": 21,
+      "cosine_similarity": 0.3015,
+      "cosine_rank": 1,
+      "is_seed": false,
+      "url": ""
+    },
+    {
+      "id": "2204.03897v4",
+      "title": "Sim-to-Real Transfer of Compliant Bipedal Locomotion on Torque Sensor-Less Gear-Driven Humanoid",
+      "regime_id": 1,
+      "regime_label": "Sim2Real-Physics",
+      "year": 2022,
+      "chart_distance": 0.7885,
+      "chart_rank": 22,
+      "cosine_similarity": 0.2933,
+      "cosine_rank": 4,
+      "is_seed": false,
+      "url": ""
+    },
+    {
+      "id": "2602.04412v3",
+      "title": "HoRD: Robust Humanoid Control via History-Conditioned Reinforcement Learning and Online Distillation",
+      "regime_id": 1,
+      "regime_label": "Sim2Real-Physics",
+      "year": 2026,
+      "chart_distance": 0.8227,
+      "chart_rank": 25,
+      "cosine_similarity": 0.2867,
+      "cosine_rank": 7,
+      "is_seed": true,
+      "url": ""
+    },
+    {
+      "id": "2505.14266v1",
+      "title": "Sampling-Based System Identification with Active Exploration for Legged Robot Sim2Real Learning",
+      "regime_id": 1,
+      "regime_label": "Sim2Real-Physics",
+      "year": 2025,
+      "chart_distance": 0.867,
+      "chart_rank": 27,
+      "cosine_similarity": 0.3712,
+      "cosine_rank": 0,
+      "is_seed": true,
+      "url": ""
+    },
+    {
+      "id": "2603.22876v2",
+      "title": "Grounding Sim-to-Real Generalization in Robotic Manipulation: An Empirical Study with Vision-Language-Action Models",
+      "regime_id": 2,
+      "regime_label": "Arm-Manipulation",
+      "year": 2026,
+      "chart_distance": 1.2216,
+      "chart_rank": 50,
+      "cosine_similarity": 0.2942,
+      "cosine_rank": 3,
+      "is_seed": false,
+      "url": ""
+    },
+    {
+      "id": "2511.04131",
+      "title": "BFM-ZERO: A PROMPTABLE BEHAVIORAL FOUNDATION MODEL FOR HUMANOID CONTROL USING UNSUPERVISED REINFORCEMENT LEARNING",
+      "regime_id": 0,
+      "regime_label": "ZeroShot-Rep",
+      "year": 2025,
+      "chart_distance": 1.4164,
+      "chart_rank": 64,
+      "cosine_similarity": 0.2954,
+      "cosine_rank": 2,
+      "is_seed": true,
+      "url": ""
+    }
+  ],
+  "neighbour_views": {
+    "by_text": [
+      {
+        "id": "2505.14266v1",
+        "title": "Sampling-Based System Identification with Active Exploration for Legged Robot Sim2Real Learning",
+        "regime_id": 1,
+        "regime_label": "Sim2Real-Physics",
+        "year": 2025,
+        "chart_distance": 0.867,
+        "chart_rank": 27,
+        "cosine_similarity": 0.3712,
+        "cosine_rank": 0,
+        "is_seed": true,
+        "url": ""
+      },
+      {
+        "id": "2609.17832v1",
+        "title": "Adaptive-MHE : A Sampling-Based Adaptive MPC for Legged Loco-Manipulation via Moving Horizon Estimation",
+        "regime_id": 1,
+        "regime_label": "Sim2Real-Physics",
+        "year": 2026,
+        "chart_distance": 0.7791,
+        "chart_rank": 21,
+        "cosine_similarity": 0.3015,
+        "cosine_rank": 1,
+        "is_seed": false,
+        "url": ""
+      },
+      {
+        "id": "2511.04131",
+        "title": "BFM-ZERO: A PROMPTABLE BEHAVIORAL FOUNDATION MODEL FOR HUMANOID CONTROL USING UNSUPERVISED REINFORCEMENT LEARNING",
+        "regime_id": 0,
+        "regime_label": "ZeroShot-Rep",
+        "year": 2025,
+        "chart_distance": 1.4164,
+        "chart_rank": 64,
+        "cosine_similarity": 0.2954,
+        "cosine_rank": 2,
+        "is_seed": true,
+        "url": ""
+      }
+    ],
+    "by_chart": [
+      {
+        "id": "2603.12185v2",
+        "title": "ComFree-Sim: A GPU-Parallelized Analytical Contact Physics Engine for Scalable Contact-Rich Robotics Simulation and Control",
+        "regime_id": 1,
+        "regime_label": "Sim2Real-Physics",
+        "year": 2026,
+        "chart_distance": 0.2252,
+        "chart_rank": 0,
+        "cosine_similarity": 0.222,
+        "cosine_rank": 86,
+        "is_seed": false,
+        "url": ""
+      },
+      {
+        "id": "2608.03116v2",
+        "title": "Shooting for Contact: Contact-Implicit Multiple Shooting for Dynamic Motion Retargeting",
+        "regime_id": 1,
+        "regime_label": "Sim2Real-Physics",
+        "year": 2026,
+        "chart_distance": 0.2566,
+        "chart_rank": 1,
+        "cosine_similarity": 0.2586,
+        "cosine_rank": 33,
+        "is_seed": false,
+        "url": ""
+      },
+      {
+        "id": "2507.23445v1",
+        "title": "Quantifying and Visualizing Sim-to-Real Gaps: Physics-Guided Regularization for Reproducibility",
+        "regime_id": 1,
+        "regime_label": "Sim2Real-Physics",
+        "year": 2025,
+        "chart_distance": 0.2987,
+        "chart_rank": 2,
+        "cosine_similarity": 0.2696,
+        "cosine_rank": 23,
+        "is_seed": false,
+        "url": ""
+      }
+    ]
+  },
+  "terms": {
+    "not_in_corpus": [
+      {
+        "term": "anisotropic",
+        "share": 0.00741,
+        "df": 2
+      },
+      {
+        "term": "unidentifiability",
+        "share": 0.00727,
+        "df": 1
+      },
+      {
+        "term": "simulation-to-reality",
+        "share": 0.0068,
+        "df": 3
+      },
+      {
+        "term": "epistemic-uncertainty-guided",
+        "share": 0.0067,
+        "df": 1
+      },
+      {
+        "term": "configuration-invariant",
+        "share": 0.00665,
+        "df": 1
+      },
+      {
+        "term": "augmentation-invariant",
+        "share": 0.00625,
+        "df": 1
+      },
+      {
+        "term": "reinforcement-learning-based",
+        "share": 0.00608,
+        "df": 1
+      },
+      {
+        "term": "electro-mechanical",
+        "share": 0.00602,
+        "df": 1
+      },
+      {
+        "term": "reidentification",
+        "share": 0.00578,
+        "df": 1
+      },
+      {
+        "term": "distribution-matching",
+        "share": 0.00572,
+        "df": 1
+      },
+      {
+        "term": "reparameterization",
+        "share": 0.00568,
+        "df": 1
+      },
+      {
+        "term": "cross-morphology",
+        "share": 0.00558,
+        "df": 2
+      },
+      {
+        "term": "non-identifiable",
+        "share": 0.00555,
+        "df": 1
+      },
+      {
+        "term": "trajectory-dependent",
+        "share": 0.00544,
+        "df": 1
+      },
+      {
+        "term": "simulation-transferable",
+        "share": 0.00541,
+        "df": 1
+      }
+    ],
+    "well_covered_by_corpus": [
+      {
+        "term": "parameterized",
+        "share": 0.00679,
+        "df": 51
+      },
+      {
+        "term": "domain-randomization",
+        "share": 0.0062,
+        "df": 4
+      },
+      {
+        "term": "representation",
+        "share": 0.0061,
+        "df": 115
+      },
+      {
+        "term": "identification",
+        "share": 0.00609,
+        "df": 40
+      },
+      {
+        "term": "simulation-to-real",
+        "share": 0.00606,
+        "df": 5
+      },
+      {
+        "term": "probabilistic",
+        "share": 0.00604,
+        "df": 8
+      },
+      {
+        "term": "parameterization",
+        "share": 0.00597,
+        "df": 20
+      },
+      {
+        "term": "excitation",
+        "share": 0.00565,
+        "df": 14
+      },
+      {
+        "term": "representation-learning",
+        "share": 0.00548,
+        "df": 4
+      },
+      {
+        "term": "calibrated",
+        "share": 0.00545,
+        "df": 20
+      },
+      {
+        "term": "quantification",
+        "share": 0.0052,
+        "df": 4
+      },
+      {
+        "term": "domain-randomized",
+        "share": 0.00516,
+        "df": 5
+      },
+      {
+        "term": "specific",
+        "share": 0.00496,
+        "df": 101
+      },
+      {
+        "term": "out-of-distribution",
+        "share": 0.00493,
+        "df": 16
+      },
+      {
+        "term": "warm-start",
+        "share": 0.00482,
+        "df": 7
+      }
+    ],
+    "map_theme_lens": [
+      {
+        "term": "representation",
+        "weight": 0.49081,
+        "df": 115,
+        "word_forms": [
+          "represent",
+          "representation",
+          "representational",
+          "representations",
+          "represented",
+          "representing",
+          "represents"
+        ],
+        "in_both_lenses": false
+      },
+      {
+        "term": "representation-learning",
+        "weight": 0.46124,
+        "df": 4,
+        "word_forms": [
+          "representation-learning"
+        ],
+        "in_both_lenses": false
+      },
+      {
+        "term": "simulation-to-reality",
+        "weight": 0.45598,
+        "df": 3,
+        "word_forms": [
+          "simulation-to-reality"
+        ],
+        "in_both_lenses": false
+      },
+      {
+        "term": "simulation-to-real",
+        "weight": 0.41145,
+        "df": 5,
+        "word_forms": [
+          "simulation-to-real"
+        ],
+        "in_both_lenses": false
+      },
+      {
+        "term": "demonstration-based",
+        "weight": 0.40737,
+        "df": 2,
+        "word_forms": [
+          "demonstration-based"
+        ],
+        "in_both_lenses": false
+      },
+      {
+        "term": "reinforcement-learning",
+        "weight": 0.40491,
+        "df": 3,
+        "word_forms": [
+          "reinforcement-learned",
+          "reinforcement-learning"
+        ],
+        "in_both_lenses": false
+      },
+      {
+        "term": "simulation-trained",
+        "weight": 0.39118,
+        "df": 5,
+        "word_forms": [
+          "simulation-trained"
+        ],
+        "in_both_lenses": false
+      },
+      {
+        "term": "observations",
+        "weight": 0.38763,
+        "df": 117,
+        "word_forms": [
+          "observation",
+          "observational",
+          "observations",
+          "observe",
+          "observed",
+          "observer",
+          "observers",
+          "observes",
+          "observing"
+        ],
+        "in_both_lenses": false
+      },
+      {
+        "term": "randomized",
+        "weight": 0.38499,
+        "df": 55,
+        "word_forms": [
+          "randomizations",
+          "randomize",
+          "randomized",
+          "randomizes"
+        ],
+        "in_both_lenses": false
+      },
+      {
+        "term": "simulation-specific",
+        "weight": 0.38484,
+        "df": 2,
+        "word_forms": [
+          "simulation-specific"
+        ],
+        "in_both_lenses": false
+      },
+      {
+        "term": "domain-randomization",
+        "weight": 0.38366,
+        "df": 4,
+        "word_forms": [
+          "domain-randomization"
+        ],
+        "in_both_lenses": false
+      },
+      {
+        "term": "parameterized",
+        "weight": 0.38352,
+        "df": 51,
+        "word_forms": [
+          "parameterizations",
+          "parameterize",
+          "parameterized",
+          "parameterizes"
+        ],
+        "in_both_lenses": false
+      }
+    ],
+    "map_concentration_lens": [
+      {
+        "term": "realto-sim-to-real",
+        "local_l1": 0.002108,
+        "enrichment": 1.661,
+        "df": 3,
+        "word_forms": [
+          "realto-sim-to-real"
+        ],
+        "source_docs": [
+          {
+            "doc": "doc 79",
+            "source": "https://arxiv.org/abs/2603.12185v2",
+            "is_seed": false,
+            "title": "ComFree-Sim: A GPU-Parallelized Analytical Contact Physics Engine for Scalable Contact-Rich Robotics Simulation and Control",
+            "weight": 0.0322
+          },
+          {
+            "doc": "doc 53",
+            "source": "https://arxiv.org/abs/2608.03116v2",
+            "is_seed": false,
+            "title": "Shooting for Contact: Contact-Implicit Multiple Shooting for Dynamic Motion Retargeting",
+            "weight": 0.0317
+          },
+          {
+            "doc": "doc 63",
+            "source": "https://arxiv.org/abs/2507.23445v1",
+            "is_seed": false,
+            "title": "Quantifying and Visualizing Sim-to-Real Gaps: Physics-Guided Regularization for Reproducibility",
+            "weight": 0.0309
+          }
+        ],
+        "in_both_lenses": false
+      },
+      {
+        "term": "real-to-sim-to-real",
+        "local_l1": 0.002598,
+        "enrichment": 1.653,
+        "df": 8,
+        "word_forms": [
+          "real-to-sim-to-real"
+        ],
+        "in_both_lenses": false
+      },
+      {
+        "term": "sim-toreal-to-sim-to-real",
+        "local_l1": 0.00277,
+        "enrichment": 1.634,
+        "df": 1,
+        "word_forms": [
+          "sim-toreal-to-sim-to-real"
+        ],
+        "source_docs": [
+          {
+            "doc": "doc 79",
+            "source": "https://arxiv.org/abs/2603.12185v2",
+            "is_seed": false,
+            "title": "ComFree-Sim: A GPU-Parallelized Analytical Contact Physics Engine for Scalable Contact-Rich Robotics Simulation and Control",
+            "weight": 0.0322
+          },
+          {
+            "doc": "doc 53",
+            "source": "https://arxiv.org/abs/2608.03116v2",
+            "is_seed": false,
+            "title": "Shooting for Contact: Contact-Implicit Multiple Shooting for Dynamic Motion Retargeting",
+            "weight": 0.0317
+          },
+          {
+            "doc": "doc 63",
+            "source": "https://arxiv.org/abs/2507.23445v1",
+            "is_seed": false,
+            "title": "Quantifying and Visualizing Sim-to-Real Gaps: Physics-Guided Regularization for Reproducibility",
+            "weight": 0.0309
+          }
+        ],
+        "in_both_lenses": false
+      },
+      {
+        "term": "real-tosim-to-real",
+        "local_l1": 0.002199,
+        "enrichment": 1.624,
+        "df": 1,
+        "word_forms": [
+          "real-tosim-to-real"
+        ],
+        "source_docs": [
+          {
+            "doc": "doc 79",
+            "source": "https://arxiv.org/abs/2603.12185v2",
+            "is_seed": false,
+            "title": "ComFree-Sim: A GPU-Parallelized Analytical Contact Physics Engine for Scalable Contact-Rich Robotics Simulation and Control",
+            "weight": 0.0322
+          },
+          {
+            "doc": "doc 53",
+            "source": "https://arxiv.org/abs/2608.03116v2",
+            "is_seed": false,
+            "title": "Shooting for Contact: Contact-Implicit Multiple Shooting for Dynamic Motion Retargeting",
+            "weight": 0.0317
+          },
+          {
+            "doc": "doc 63",
+            "source": "https://arxiv.org/abs/2507.23445v1",
+            "is_seed": false,
+            "title": "Quantifying and Visualizing Sim-to-Real Gaps: Physics-Guided Regularization for Reproducibility",
+            "weight": 0.0309
+          }
+        ],
+        "in_both_lenses": false
+      }
+    ],
+    "shared_terms": []
+  }
+}

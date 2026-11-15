@@ -1,13 +1,16 @@
 """Phase 3: fixed Knowledge Manifold and the four discovery fields.
 
-Reproduces Obayashi et al. (2026) Sections 3.1-3.7, 4.2, 4.3 and 5.2-5.5.
+Reproduces Obayashi et al. (2026) Sections 3.1-3.7, 4.2, 4.3 and 5.2-5.5, with
+the two-dimensional construction, SPH kernel and GPR formulation taken from
+Okabe & Komatsu (2026). Where the two papers differ, the KMO paper wins: the
+gauge is nine anchors (eight perimeter + one central, Sec. 5.2) rather than the
+foundational paper's four corners.
 
 The structure is:
 
 1. Documents have fixed coordinates ``x_i`` on a bounded, gauge-fixed chart
-   ``Omega = [-1, 1]^2`` (nine anchors: eight perimeter, one central; the
-   remaining documents placed by constrained stress minimisation initialised by
-   classical MDS, then frozen).
+   ``Omega = [-1, 1]^2`` (nine anchors; the remaining documents placed by
+   constrained stress minimisation initialised by classical MDS, then frozen).
 2. A 21 x 21 regular grid gives 441 candidate locations at spacing 0.1.
 3. Four competing objectives are evaluated on the grid. ``P_boundary`` is the
    harmonic mean of *three* boundary-strength views (K=5 global, K=8 global,
@@ -16,32 +19,46 @@ The structure is:
    term; ``G`` is the semantic gradient of the interpolated field; ``S`` is
    evidential support. ``R`` is computed but is a diagnostic, not an objective.
 
-Two implementation notes that matter for fidelity:
+Every quantity below is a paper equation, not an approximation of one:
 
 ``P_boundary`` is a harmonic mean of three views, not a weighted sum
     A weighted sum lets one strong view compensate for a weak one. The harmonic
     mean is AND-like: any view near zero drags the whole score down, which is
     the intended semantics (Section 4.2).
 
-``G`` is central differences of `v` itself, taken through the Gram matrix
+``w_i`` is the normalised cubic-spline kernel of Eqs. 10-11
+    ``W(q) = 1 - 3/2 q^2 + 3/4 q^3`` on ``q < 1``, ``1/4 (2-q)^3`` on
+    ``1 <= q < 2``, and zero beyond, with ``w_i = W(q_i) / sum_j W(q_j)``. The
+    global smoothing length is Eq. 9's ``h(x) = max_i ||x - x_i|| / 1.98``,
+    evaluated *per query point*, so every document contributes; the adaptive
+    field uses ``h_i = d8_i / 1.98``, which puts each document's eighth
+    neighbour just inside the support.
+
+``G`` is Eq. 14's central difference of ``v`` at ``delta = 1e-3``
     ``v(x) = normalize(sum_i w_i(x) z_i)`` lives in a 250,000-dimensional space,
     so materialising it for 441 grid points would need ~880 MB. The Jacobian
     norm only needs *inner products between normalised field values*, and those
-    collapse onto the ``N x N`` Gram matrix ``K = Z Z^T``. With unnormalised
-    ``A_i = Z^T w_i`` and ``n_i = ||A_i||``:
+    collapse onto the ``N x N`` Gram matrix ``K = Z Z^T``. With
+    ``A = Z^T w`` and ``n = ||A||``:
 
         cos(v_a, v_b) = (w_a^T K w_b) / (n_a n_b)
 
-    so the central-difference estimate
+    so ``||dv/dx|| = ||v(x + delta) - v(x - delta)|| / (2 delta)`` becomes
+    ``sqrt(2 - 2 cos(v_+, v_-)) / (2 delta)``. The bandwidth is recomputed at
+    ``x +/- delta``, because Eq. 9 makes ``h`` part of the field's definition.
 
-        ||dv/dx|| = ||v(x + dx) - v(x - dx)|| / (2 dx)
+``u`` is a *relative* uncertainty, ``sigma_post / sigma_prior`` (Section 5.2)
+    Eq. 19's anisotropic RBF + white-noise kernel is fitted on a 10-dimensional
+    SVD projection with ``normalize_y=False`` and 10 restarts. A multi-output GP
+    with a shared kernel has one posterior variance, so ``sigma_post`` is read
+    from a single target column; summing the identical columns would multiply it
+    by ``sqrt(10)``.
 
-    becomes ``sqrt(2 - 2 cos(v_+, v_-)) / (2 dx)``, which is the *same estimator*
-    - literal central differences between neighbouring field values, not a
-    first-order projection - evaluated exactly at Gram cost. Deriving it as
-    ``(I - v v^T) dA/dx / ||A||`` instead would be only first-order accurate and
-    drifts by several tens of percent wherever the field turns sharply.
+Stress is the foundational paper's normalised, regularised objective (Eqs. 4-8),
+not a raw residual sum, and ``stress_energy`` returns the analytic gradient that
+L-BFGS-B consumes (a unit test checks it against finite differences).
 """
+
 
 from __future__ import annotations
 
@@ -50,7 +67,7 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import scipy.sparse as sp
@@ -93,6 +110,41 @@ VIEW_SPECS = (
 
 #: Section 5.2: nine anchors, eight on the perimeter plus one central.
 ANCHOR_RADIUS = 0.92
+
+#: Foundational Sec. 3.3: the free coordinates are constrained to
+#: ``[-0.98, 0.98]^2``, i.e. strictly inside the chart ``Omega = [-1, 1]^2``.
+#: Keeping documents off the outer boundary matters downstream: a document
+#: sitting exactly on a grid corner makes ``d_nn = 0`` there, so that corner is
+#: excluded from the white-space band for a reason that is an artefact of the
+#: gauge rather than a property of the corpus.
+DOCUMENT_MARGIN = 0.02
+
+#: Eq. 10: the cubic-spline kernel has compact support ``q < 2``.
+CUBIC_SPLINE_RADIUS = 2.0
+
+#: Eq. 9: ``h = max_i r_i / 1.98`` puts the farthest document just inside the
+#: kernel support (``q = 1.98 < 2``), so all N documents contribute.
+SMOOTHING_SUPPORT_RATIO = 1.98
+
+#: Eq. 7: the entropy floor ``p log(p + eps)``.  ``K = 1`` has no entropy and is
+#: rejected, so ``log K`` is never zero.
+ENTROPY_EPSILON = 1e-12
+
+#: Eq. 14: central-difference step for the knowledge gradient.
+GRADIENT_DELTA = 1e-3
+
+#: Eqs. 9-10: percentile pair used by ``N_+``/``N_-``.  Overridable via
+#: ``manifold.norm_percentiles`` in ``config.yaml``.
+NORM_PERCENTILES = (10.0, 90.0)
+
+#: Foundational Eqs. 4-8: constrained stress-minimisation regularisers.
+STRESS_LAMBDA_REP = 0.10
+STRESS_LAMBDA_VAR = 0.05
+STRESS_LAMBDA_CTR = 0.01
+STRESS_SIGMA = 0.35
+
+#: Eq. 7b of the foundational paper: the variance of U[-1, 1] per axis.
+TARGET_VARIANCE = 1.0 / 3.0
 
 #: Guards a division-by-zero in the SPH kernel when two documents coincide.
 MIN_BANDWIDTH = 1e-6
@@ -197,6 +249,116 @@ def select_anchors(
     return anchor_index, np.array(targets, dtype=np.float64)
 
 
+def anchor_scale(
+    distances: NDArray[np.float64],
+    anchor_index: NDArray[np.int64],
+    anchor_target: NDArray[np.float64],
+) -> float:
+    """Stress scale factor ``alpha`` (foundational Eq. 5).
+
+    ``alpha`` is chosen so the mean 2-D distance between the gauge-fixing anchors
+    equals the mean cosine distance among those same documents:
+
+        ``alpha = mean_{a<b} ||t_a - t_b|| / mean_{a<b} D_{ab}``.
+
+    The foundational paper fixes this from its four corner representatives; with
+    the nine-anchor gauge of the Knowledge Manifold Optimization paper the same
+    rule is applied to the nine anchors, which is what keeps two-dimensional
+    distances commensurate with cosine distances before any free coordinate is
+    fitted.
+    """
+    index = np.asarray(anchor_index, dtype=np.int64)
+    targets = np.asarray(anchor_target, dtype=np.float64)
+    pair = np.triu(np.ones((len(index), len(index)), dtype=bool), k=1)
+    chart = pairwise_distances(targets, targets)[pair].mean()
+    semantic = distances[np.ix_(index, index)][pair].mean()
+    if semantic <= 1e-12:
+        return 1.0
+    return float(chart / semantic)
+
+
+def stress_energy(
+    coords: NDArray[np.float64],
+    distances: NDArray[np.float64],
+    anchor_index: NDArray[np.int64],
+    alpha: float,
+    lambda_rep: float = STRESS_LAMBDA_REP,
+    lambda_var: float = STRESS_LAMBDA_VAR,
+    lambda_ctr: float = STRESS_LAMBDA_CTR,
+    sigma: float = STRESS_SIGMA,
+) -> tuple[float, NDArray[np.float64], dict[str, float]]:
+    """Foundational Eqs. 4-8 objective ``J`` and its exact gradient.
+
+    ``J = E_stress + lambda_rep E_rep + lambda_var E_var + lambda_ctr E_ctr``
+    with
+
+        ``E_stress = sum_{i<j} (||y_i-y_j|| - alpha D_ij)^2 / sum_{i<j} (alpha D_ij)^2``
+        ``E_rep    = 2/(N(N-1)) sum_{i<j} exp(-||y_i-y_j||^2 / (2 sigma^2))``
+        ``E_var    = ((var_x - 1/3)^2 + (var_y - 1/3)^2) / (1/3)^2``
+        ``E_ctr    = mean(x)^2 + mean(y)^2``
+
+    Returns ``(J, dJ/dy, components)``.  The gradient at the anchor rows is zeroed
+    because ``constrained_stress`` holds those coordinates fixed.
+    """
+    n = coords.shape[0]
+    delta = coords[:, None, :] - coords[None, :, :]
+    dist = np.linalg.norm(delta, axis=-1)
+    safe = np.where(dist <= 1e-12, 1.0, dist)
+    scaled = alpha * distances
+    pair_mask = np.triu(np.ones((n, n), dtype=bool), k=1)
+
+    denominator = float(np.sum(scaled[pair_mask] ** 2))
+    denominator = denominator if denominator > 1e-300 else 1.0
+    pair_count = float(n * (n - 1)) if n > 1 else 1.0
+    variance_scale = TARGET_VARIANCE**2
+
+    # E_stress.  ``residual`` is symmetric with a zero diagonal, so the full
+    # matrix double-counts unordered pairs: half-fill for the energy, and the
+    # ordered sum already carries the factor 2 that d/dy_i needs.
+    residual = dist - scaled
+    stress = 0.5 * float(np.sum(residual**2)) / denominator
+    coefficient = np.where(dist <= 1e-12, 0.0, residual / safe)
+    gradient_stress = 2.0 * np.einsum("ij,ijk->ik", coefficient, delta) / denominator
+
+    # E_rep, over unordered pairs only.
+    exponential = np.exp(-(dist**2) / (2.0 * sigma**2))
+    repulsion = 2.0 * float(np.sum(exponential[pair_mask])) / pair_count
+    coefficient_rep = np.where(pair_mask | pair_mask.T, -exponential / (sigma**2), 0.0)
+    gradient_rep = (
+        2.0 * lambda_rep * np.einsum("ij,ijk->ik", coefficient_rep, delta) / pair_count
+    )
+
+    # E_var against 1/3, the variance of U[-1, 1] per axis.
+    mean = coords.mean(axis=0)
+    variance = coords.var(axis=0)
+    deviation = variance - TARGET_VARIANCE
+    variance_energy = float(np.sum(deviation**2)) / variance_scale
+    gradient_var = (
+        4.0 * lambda_var * ((coords - mean) * deviation[None, :]) / (n * variance_scale)
+    )
+
+    # E_ctr.
+    centring = float(np.sum(mean**2))
+    gradient_ctr = np.broadcast_to(2.0 * lambda_ctr * mean[None, :] / n, coords.shape)
+
+    total = (
+        stress
+        + lambda_rep * repulsion
+        + lambda_var * variance_energy
+        + lambda_ctr * centring
+    )
+    gradient = gradient_stress + gradient_rep + gradient_var + gradient_ctr
+    gradient = np.array(gradient, dtype=np.float64)
+    gradient[anchor_index] = 0.0
+    components = {
+        "stress": stress,
+        "repulsion": repulsion,
+        "variance": variance_energy,
+        "centring": centring,
+    }
+    return total, gradient, components
+
+
 def constrained_stress(
     distances: NDArray[np.float64],
     init: NDArray[np.float64],
@@ -204,12 +366,27 @@ def constrained_stress(
     anchor_target: NDArray[np.float64],
     bounds: tuple[float, float] = (-1.0, 1.0),
     max_iterations: int = 800,
+    alpha: float | None = None,
+    lambda_rep: float = STRESS_LAMBDA_REP,
+    lambda_var: float = STRESS_LAMBDA_VAR,
+    lambda_ctr: float = STRESS_LAMBDA_CTR,
+    sigma: float = STRESS_SIGMA,
 ) -> tuple[NDArray[np.float64], float, float]:
-    """Minimize metric stress with the anchor coordinates pinned.
+    """Minimise the constrained stress objective with the anchors pinned.
 
-    Stress is ``0.5 * sum_{i<j} (||x_i - x_j|| - D_ij)^2``, with the nine anchors
-    held at their gauge-fixing targets and every free coordinate bounded to the
-    chart so no document leaves ``[-1, 1]^2``.
+    The objective is ``stress_energy``: the foundational paper's Eqs. 4-8, i.e.
+    normalised metric stress plus repulsion, variance and centring regularisers
+    with ``lambda_rep = 0.10``, ``lambda_var = 0.05``, ``lambda_ctr = 0.01`` and
+    ``sigma = 0.35``.  The nine anchors are held at their gauge-fixing targets
+    and every free coordinate is bounded to the chart, so no document leaves
+    ``[-1, 1]^2``.
+
+    ``alpha`` is Eq. 5's scale factor; by default it comes from ``anchor_scale``,
+    which generalises the paper's four-corner rule to the nine-anchor gauge.
+
+    The returned stress is ``E_stress`` - the paper's *normalised* stress, the
+    quantity comparable with its reported 0.1505 - not the raw residual sum the
+    earlier implementation logged under the same name.
     """
     from scipy.optimize import minimize
 
@@ -217,44 +394,47 @@ def constrained_stress(
     coords = init.copy()
     coords[anchor_index] = anchor_target
     free = np.setdiff1d(np.arange(n), anchor_index)
+    if alpha is None:
+        alpha = anchor_scale(distances, anchor_index, anchor_target)
+
+    scaled = alpha * distances
+    pair_mask = np.triu(np.ones((n, n), dtype=bool), k=1)
 
     def unpack(flat: NDArray[np.float64]) -> NDArray[np.float64]:
         full = coords.copy()
         full[free] = flat.reshape(-1, 2)
         return full
 
-    def stress_and_gradient(
-        flat: NDArray[np.float64],
-    ) -> tuple[float, NDArray[np.float64]]:
-        full = unpack(flat)
-        delta = full[:, None, :] - full[None, :, :]
-        dist = np.linalg.norm(delta, axis=-1)
-        safe = np.where(dist <= 1e-12, 1.0, dist)
-        residual = dist - distances
-        stress = 0.5 * float(np.sum(residual**2))
-
-        # d/dx_i of 0.5 * sum_{i<j} r_ij^2 = sum_{j!=i} r_ij (x_i - x_j)/d_ij
-        coefficient = np.where(dist <= 1e-12, 0.0, residual / safe)
-        gradient_full = np.einsum("ij,ijk->ik", coefficient, delta)
-        gradient_full[anchor_index] = 0.0
-        return stress, gradient_full[free].ravel()
+    def objective(flat: NDArray[np.float64]) -> tuple[float, NDArray[np.float64]]:
+        total, gradient, _ = stress_energy(
+            unpack(flat),
+            distances,
+            anchor_index,
+            alpha,
+            lambda_rep=lambda_rep,
+            lambda_var=lambda_var,
+            lambda_ctr=lambda_ctr,
+            sigma=sigma,
+        )
+        return total, gradient[free].ravel()
 
     start = coords[free].ravel()
-    lower, upper = bounds
+    lower, upper_bound = bounds
     result = minimize(
-        stress_and_gradient,
+        objective,
         start,
         jac=True,
         method="L-BFGS-B",
-        bounds=[(lower, upper)] * start.size,
+        bounds=[(lower, upper_bound)] * start.size,
         options={"maxiter": max_iterations, "maxfun": max_iterations * 4},
     )
     final = unpack(result.x)
 
-    pair_mask = np.triu(np.ones((n, n), dtype=bool), k=1)
     final_dist = np.linalg.norm(final[:, None, :] - final[None, :, :], axis=-1)
     original = distances[pair_mask]
     embedded = final_dist[pair_mask]
+    denominator = float(np.sum(scaled[pair_mask] ** 2)) or 1.0
+    stress_final = float(np.sum((embedded - scaled[pair_mask]) ** 2) / denominator)
     # Shepard-style agreement between embedding and true distances.
     corr = float(
         np.corrcoef(np.argsort(np.argsort(original)), np.argsort(np.argsort(embedded)))[
@@ -262,14 +442,16 @@ def constrained_stress(
         ]
     )
     LOGGER.info(
-        "Stress minimization: final stress=%.5f, Spearman(distance)=%.4f, "
-        "converged=%s (%d iterations)",
+        "Stress minimization: E_stress=%.5f (alpha=%.4f, J=%.5f), "
+        "Spearman(distance)=%.4f, converged=%s (%d iterations)",
+        stress_final,
+        alpha,
         float(result.fun),
         corr,
         bool(result.success),
         int(result.nit),
     )
-    return final, float(result.fun), corr
+    return final, stress_final, corr
 
 
 def cluster_labels(z_l2: sp.spmatrix, k: int) -> NDArray[np.int64]:
@@ -308,16 +490,22 @@ def build_manifold(gram: NDArray[np.float64], config: dict[str, Any]) -> Manifol
     distances = cosine_distance_matrix(gram)
     init = _scale_to_chart(classical_mds(distances, n_components=2))
     anchor_index, anchor_target = select_anchors(init, n_perimeter=n_perimeter)
+    # Foundational Sec. 3.3: free coordinates stay at least DOCUMENT_MARGIN
+    # inside the chart, so no document lands on the outer boundary.
+    margin = min(DOCUMENT_MARGIN, 0.5 * (bounds[1] - bounds[0]))
+    document_bounds = (bounds[0] + margin, bounds[1] - margin)
     coords, stress, correlation = constrained_stress(
-        distances, init, anchor_index, anchor_target, bounds=bounds
+        distances, init, anchor_index, anchor_target, bounds=document_bounds
     )
 
     LOGGER.info(
-        "Manifold: %d documents on [%.2f, %.2f]^2, bounds x=[%.3f, %.3f] "
-        "y=[%.3f, %.3f]",
+        "Manifold: %d documents on [%.2f, %.2f]^2 (document bounds [%.2f, %.2f]), "
+        "x=[%.3f, %.3f] y=[%.3f, %.3f]",
         coords.shape[0],
         bounds[0],
         bounds[1],
+        document_bounds[0],
+        document_bounds[1],
         coords[:, 0].min(),
         coords[:, 0].max(),
         coords[:, 1].min(),
@@ -354,17 +542,95 @@ def pairwise_distances(
     return np.linalg.norm(delta, axis=-1)
 
 
+def cubic_spline_kernel(q: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Cubic-spline SPH kernel ``W(q)``, Eq. 10 of the Knowledge Manifold paper.
+
+    ``W(q) = 1 - 3/2 q^2 + 3/4 q^3`` for ``0 <= q < 1``, ``1/4 (2-q)^3`` for
+    ``1 <= q < 2``, and ``0`` beyond.  The two branches agree at ``q = 1``
+    (both give ``1/4``) and ``W(0) = 1``, so the kernel is continuous.
+
+    The ``1/(pi h^2)`` normalisation constant of the 2-D SPH kernel is omitted
+    on purpose: Eq. 11 renormalises by ``sum_j W(q_j)``, so any constant factor
+    cancels exactly and the weights remain a probability vector.
+    """
+    q = np.asarray(q, dtype=np.float64)
+    kernel = np.zeros_like(q)
+    inner = (q >= 0.0) & (q < 1.0)
+    kernel[inner] = 1.0 - 1.5 * q[inner] ** 2 + 0.75 * q[inner] ** 3
+    outer = (q >= 1.0) & (q < CUBIC_SPLINE_RADIUS)
+    kernel[outer] = 0.25 * (CUBIC_SPLINE_RADIUS - q[outer]) ** 3
+    return kernel
+
+
+def sph_bandwidth(
+    points: NDArray[np.float64],
+    coords: NDArray[np.float64],
+    nearest_k: int | None = None,
+) -> NDArray[np.float64]:
+    """Smoothing length ``h(p)`` at every query point (Eq. 9).
+
+    Eq. 9 sets ``h = max_i r_i / 1.98`` so that every document satisfies
+    ``q_i = r_i / h <= 1.98 < 2`` and therefore contributes: one smoothing scale
+    over the full map, which is what the paper calls the *global* field.
+
+    ``nearest_k`` replaces the ``max`` with the ``nearest_k``-th nearest
+    document, giving the *adaptive* field's local scale (Section 5.4: "a local
+    scale based on the eight nearest documents"): the same rule, restricted to
+    the query point's own neighbourhood instead of the whole corpus.
+    """
+    distances = pairwise_distances(points, coords)
+    if distances.shape[1] == 0:
+        raise ValueError("sph_bandwidth needs at least one document coordinate")
+    if nearest_k is None:
+        radius = distances.max(axis=1)
+    else:
+        k = min(max(1, int(nearest_k)), distances.shape[1])
+        radius = np.sort(distances, axis=1)[:, k - 1]
+    return np.maximum(radius / SMOOTHING_SUPPORT_RATIO, MIN_BANDWIDTH)
+
+
+def _normalise_kernel_rows(
+    kernel: NDArray[np.float64], distances: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """``w_i = W(q_i) / sum_j W(q_j)`` (Eq. 11), with a nearest-document fallback.
+
+    A row whose kernel support contains no document would divide by zero.  That
+    cannot happen with Eq. 9's bandwidth, which is constructed so the farthest
+    document sits at ``q = 1.98``, but a caller may pass a bandwidth small enough
+    to empty the support.  The limit of the kernel as ``h -> 0`` is the nearest
+    document alone, so that is the deterministic fallback rather than an
+    undefined row.
+    """
+    totals = kernel.sum(axis=1, keepdims=True)
+    normalised = np.divide(
+        kernel, totals, out=np.zeros_like(kernel), where=totals > 0.0
+    )
+    empty = np.flatnonzero(totals[:, 0] <= 0.0)
+    if empty.size:
+        nearest = np.argmin(distances[empty], axis=1)
+        normalised[empty, nearest] = 1.0
+    return normalised
+
+
 def sph_weights(
     grid: NDArray[np.float64],
     coords: NDArray[np.float64],
-    bandwidth: float,
+    bandwidth: float | NDArray[np.float64],
 ) -> NDArray[np.float64]:
-    """Global SPH kernel weights ``exp(-||x - x_i||^2 / (2 h^2))``.
+    """Normalised SPH kernel weights (Eqs. 10-11) for the global field.
 
-    ``bandwidth`` is one smoothing scale over the full map (Section 5.4).
+    ``bandwidth`` is either one smoothing scale for every query point or one
+    scale per query point, which is how Eq. 9's ``h(p) = max_i r_i(p) / 1.98`` is
+    normally supplied.  The returned rows sum to one, as Eq. 11 requires, so
+    ``w_i`` can be read directly as a document-contribution probability.
     """
-    squared = pairwise_distances(grid, coords) ** 2
-    return np.exp(-squared / (2.0 * float(bandwidth) ** 2))
+    distances = pairwise_distances(grid, coords)
+    h = np.asarray(bandwidth, dtype=np.float64)
+    if h.ndim == 0:
+        q = distances / max(float(h), MIN_BANDWIDTH)
+    else:
+        q = distances / np.maximum(h, MIN_BANDWIDTH).reshape(-1, 1)
+    return _normalise_kernel_rows(cubic_spline_kernel(q), distances)
 
 
 def sph_weights_adaptive(
@@ -374,34 +640,67 @@ def sph_weights_adaptive(
 ) -> NDArray[np.float64]:
     """Adaptive SPH weights with one smoothing length ``h_i`` per document.
 
-    ``w_i(x) = exp(-||x - x_i||^2 / (2 h_i^2))``, the standard adaptive SPH
-    kernel: a document in a sparse neighbourhood smooths over a longer scale.
+    ``w_i(x) = W(||x - x_i|| / h_i)``: a document in a sparse neighbourhood
+    smooths over a longer scale, so the kernel is centred on each document rather
+    than on the query point.  ``h_i`` comes from ``document_bandwidth``, already
+    divided by 1.98 so the document's eight-neighbour neighbourhood lies inside
+    the cubic-spline support.
     """
-    squared = pairwise_distances(grid, coords) ** 2
+    distances = pairwise_distances(grid, coords)
     h = np.maximum(np.asarray(document_bandwidth, dtype=np.float64), MIN_BANDWIDTH)
-    return np.exp(-squared / (2.0 * h[None, :] ** 2))
+    return _normalise_kernel_rows(cubic_spline_kernel(distances / h[None, :]), distances)
 
 
 def document_bandwidth(
     coords: NDArray[np.float64], nearest_k: int = 8
 ) -> NDArray[np.float64]:
-    """Per-document smoothing length: distance to the ``nearest_k``-th neighbour.
+    """Per-document smoothing length ``h_i = d_(k,i) / 1.98``.
 
     Section 5.4: "the adaptive field used a local scale based on the eight
-    nearest documents". ``nearest_k`` counts the document itself as neighbour
-    zero, so ``k=8`` is the 8th nearest other document.
+    nearest documents", with ``nearest_k`` counting *other* documents (the self
+    distance is excluded).  The ``1/1.98`` factor is the same convention as
+    Eq. 9: with ``h_i = d_(k,i) / 1.98`` the ``k``-th neighbour sits at
+    ``q = 1.98``, i.e. just inside the kernel support, so exactly the intended
+    neighbourhood contributes.
     """
     distances = pairwise_distances(coords, coords)
     np.fill_diagonal(distances, np.inf)
     k = min(max(1, nearest_k), distances.shape[1] - 1)
     ordered = np.sort(distances, axis=1)
-    return np.maximum(ordered[:, k - 1], MIN_BANDWIDTH)
+    return np.maximum(ordered[:, k - 1] / SMOOTHING_SUPPORT_RATIO, MIN_BANDWIDTH)
+
+
+def _percentile_pair(manifold_cfg: dict[str, Any]) -> tuple[float, float]:
+    """Read ``manifold.norm_percentiles`` (Eqs. 9-10), defaulting to (10, 90)."""
+    raw = manifold_cfg.get("norm_percentiles", list(NORM_PERCENTILES))
+    if not isinstance(raw, (list, tuple)) or len(raw) != 2:
+        raise SystemExit(
+            "manifold.norm_percentiles must be a two-element pair, "
+            f"got {raw!r}"
+        )
+    low, high = sorted((float(raw[0]), float(raw[1])))
+    if not 0.0 <= low < high <= 100.0:
+        raise SystemExit(
+            "manifold.norm_percentiles must satisfy 0 <= low < high <= 100, "
+            f"got {raw!r}"
+        )
+    return low, high
 
 
 def normalize_percentile(
-    values: NDArray[np.float64], low: float = 10.0, high: float = 90.0
+    values: NDArray[np.float64],
+    low: float = 10.0,
+    high: float = 90.0,
+    percentiles: tuple[float, float] | None = None,
 ) -> tuple[NDArray[np.float64], tuple[float, float]]:
-    """``N_+(z) = clip((z - P_low) / (P_high - P_low), 0, 1)`` (Eq. 9)."""
+    """``N_+(z) = clip((z - P_low) / (P_high - P_low), 0, 1)`` (Eq. 9).
+
+    ``percentiles`` overrides ``low``/``high`` so the pair configured in
+    ``manifold.norm_percentiles`` reaches every call site; the paper fixes it at
+    ``(10, 90)``.
+    """
+    if percentiles is not None:
+        low, high = float(percentiles[0]), float(percentiles[1])
     p_low = float(np.percentile(values, low))
     p_high = float(np.percentile(values, high))
     span = p_high - p_low
@@ -426,10 +725,24 @@ def normalized_mixture(
 def boundary_strength(
     mixture: NDArray[np.float64],
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Return raw normalized entropy ``H_K`` and dominant-second gap ``Dp_K``."""
+    """Return raw normalized entropy ``H_K`` and dominant-second gap ``Dp_K``.
+
+    Eq. 7: ``H_K(x) = -1/log K * sum_c p_c log(p_c + eps)``.  The ``eps`` is
+    added *inside* the logarithm (it only regularises the ``p = 0`` limit); the
+    leading ``p`` is the unmodified probability, so a uniform mixture gives
+    exactly ``H_K = 1`` and a one-hot mixture exactly ``0``.
+
+    Eq. 8: ``Dp_K = p^(1) - p^(2)``, the gap between the largest and the
+    second-largest cluster probability.
+    """
     n_clusters = mixture.shape[1]
-    safe = np.clip(mixture, 1e-12, None)
-    entropy = -(mixture * np.log(safe)).sum(axis=1) / np.log(n_clusters)
+    if n_clusters < 2:
+        raise ValueError(
+            f"Eq. 7 normalises by log K, so K must be >= 2 (got {n_clusters})"
+        )
+    entropy = -(mixture * np.log(mixture + ENTROPY_EPSILON)).sum(axis=1) / np.log(
+        n_clusters
+    )
     entropy = np.clip(entropy, 0.0, 1.0)
     ordered = np.sort(mixture, axis=1)
     gap = ordered[:, -1] - ordered[:, -2]
@@ -437,11 +750,13 @@ def boundary_strength(
 
 
 def boundary_score(
-    entropy: NDArray[np.float64], gap: NDArray[np.float64]
+    entropy: NDArray[np.float64],
+    gap: NDArray[np.float64],
+    percentiles: tuple[float, float] = NORM_PERCENTILES,
 ) -> NDArray[np.float64]:
     """``B_K = 0.65 N_+(H_K) + 0.35 N_-(Dp_K)`` (Eq. 11)."""
-    normalized_entropy, _ = normalize_percentile(entropy)
-    normalized_gap, _ = normalize_percentile(gap)
+    normalized_entropy, _ = normalize_percentile(entropy, percentiles=percentiles)
+    normalized_gap, _ = normalize_percentile(gap, percentiles=percentiles)
     return ENTROPY_WEIGHT * normalized_entropy + GAP_WEIGHT * (1.0 - normalized_gap)
 
 
@@ -555,16 +870,99 @@ def _difference_pairs(
     )
 
 
+def _normalised_field_projection(
+    weights: NDArray[np.float64], gram: NDArray[np.float64]
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """``A = Z^T w`` and ``||A||``, i.e. the unnormalised field vector and its norm.
+
+    ``v = A / ||A||`` is Eq. 5's normalised interpolated field.  Only ``N x N``
+    inner products are ever formed, so the 250,000-dimensional vector is never
+    materialised.
+    """
+    projected = weights @ gram
+    norm = np.sqrt(np.maximum(np.einsum("mi,mi->m", weights, projected), 0.0))
+    return projected, norm
+
+
+def _cosine_between_fields(
+    projected_a: NDArray[np.float64],
+    weights_b: NDArray[np.float64],
+    norm_a: NDArray[np.float64],
+    norm_b: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """``cos(v_a, v_b) = w_a^T K w_b / (n_a n_b)`` for the normalised field."""
+    inner = np.einsum("mi,mi->m", projected_a, weights_b)
+    scale = norm_a * norm_b
+    scale = np.where(scale <= 0.0, 1.0, scale)
+    return np.clip(inner / scale, -1.0, 1.0)
+
+
+def semantic_gradient_field(
+    points: NDArray[np.float64],
+    coords: NDArray[np.float64],
+    gram: NDArray[np.float64],
+    nearest_k: int | None = None,
+    delta: float = GRADIENT_DELTA,
+) -> NDArray[np.float64]:
+    """``g(x) = ||J_v(x)||_F`` by Eq. 14 central differences at step ``delta``.
+
+    Eq. 13 defines the Jacobian of the *interpolated field itself*, and Eq. 14
+    evaluates its columns by central differences of ``v`` with ``delta = 1e-3``.
+    This function does exactly that: it evaluates the Eq. 5 field at
+    ``x +/- delta e_axis`` (with Eq. 9's smoothing length recomputed at those
+    points, since ``h`` is part of the field's definition) and takes
+
+        ``||dv/dx|| = sqrt(2 - 2 cos(v_+, v_-)) / (2 delta)``,
+
+    which is the plain difference of normalised vectors expressed through inner
+    products.  Squaring and summing over the two axes gives ``||J_v||_F``.
+
+    ``nearest_k=None`` uses Eq. 9's corpus-wide smoothing length, which is the
+    global field the paper differentiates; ``nearest_k=8`` would differentiate
+    the adaptive field instead.
+    """
+    points = np.asarray(points, dtype=np.float64).reshape(-1, 2)
+    if delta <= 0.0:
+        raise ValueError(f"delta must be positive, got {delta}")
+    squared = np.zeros(len(points), dtype=np.float64)
+    step = (2.0 * float(delta)) ** 2
+
+    for axis in range(2):
+        plus = points.copy()
+        plus[:, axis] += delta
+        minus = points.copy()
+        minus[:, axis] -= delta
+        weights_plus = sph_weights(
+            plus, coords, sph_bandwidth(plus, coords, nearest_k)
+        )
+        weights_minus = sph_weights(
+            minus, coords, sph_bandwidth(minus, coords, nearest_k)
+        )
+        projected_plus, norm_plus = _normalised_field_projection(weights_plus, gram)
+        _, norm_minus = _normalised_field_projection(weights_minus, gram)
+        cosine = _cosine_between_fields(
+            projected_plus, weights_minus, norm_plus, norm_minus
+        )
+        squared += np.maximum(2.0 - 2.0 * cosine, 0.0) / step
+
+    return np.sqrt(squared)
+
+
 def semantic_gradient(
     weights: NDArray[np.float64],
     gram: NDArray[np.float64],
     grid_size: int,
     spacing: float,
 ) -> NDArray[np.float64]:
-    """Raw Jacobian Frobenius norm ``g(x) = ||J_v(x)||_F`` (Eqs. 13-14).
+    """Discrete stencil estimate of ``g(x) = ||J_v(x)||_F`` (Eqs. 13-14).
 
-    Central differences of the *normalised* interpolated field, evaluated from
-    pairwise inner products so the 250,000-dimensional field is never built.
+    This is the same central difference of the normalised field as
+    ``semantic_gradient_field``, but taken between neighbouring samples of an
+    already-evaluated grid.  It is the estimator to use when only field samples
+    are available; because its step is the grid spacing (0.1 on the 21x21 grid)
+    rather than Eq. 14's ``delta = 1e-3``, the pipeline uses
+    ``semantic_gradient_field`` instead.
+
     Rows of ``weights`` follow the ``x``-major grid layout, so the index grid
     below has axis 0 = x and axis 1 = y.
     """
@@ -574,8 +972,7 @@ def semantic_gradient(
             f"weights has {weights.shape[0]} rows but the grid has {n_points} points"
         )
 
-    projected = weights @ gram
-    norm = np.sqrt(np.maximum(np.einsum("mi,mi->m", weights, projected), 0.0))
+    projected, norm = _normalised_field_projection(weights, gram)
     index_grid = np.arange(n_points).reshape(grid_size, grid_size)
 
     low, high, divisor = _difference_pairs(grid_size)
@@ -591,13 +988,9 @@ def semantic_gradient(
                 high_index = index_grid[:, high[position]]
                 target = index_grid[:, position]
 
-            # cos(v_a, v_b) = w_a^T K w_b / (n_a n_b), and ||v_a - v_b||^2 =
-            # 2 - 2 cos(v_a, v_b), so this is the plain central difference of the
-            # normalised field, taken between real neighbouring grid values.
-            inner = np.einsum("mi,mi->m", projected[low_index], weights[high_index])
-            scale = norm[low_index] * norm[high_index]
-            scale = np.where(scale <= 0.0, 1.0, scale)
-            cosine = np.clip(inner / scale, -1.0, 1.0)
+            cosine = _cosine_between_fields(
+                projected[low_index], weights[high_index], norm[low_index], norm[high_index]
+            )
             step = (float(divisor[position]) * spacing) ** 2
             total[target] += np.maximum(2.0 - 2.0 * cosine, 0.0) / step
     return np.sqrt(total)
@@ -625,26 +1018,52 @@ def support_statistics(
     return n_eff, d5, top_three
 
 
+def _kernel_prior_std(kernel: object) -> float:
+    """``sigma_prior = sqrt(c0 + c_white)`` for the Eq. 19 kernel.
+
+    The prior variance of a GP with ``k(y,y) = c0 + c_white`` is the sum of the
+    constant amplitude and the white-noise level; its square root is the
+    denominator of the relative uncertainty ``sigma_post / sigma_prior``
+    (Section 5.2).  Fitted ``k1``/``k2``/``k1.k1`` attribute chains are used
+    because sklearn exposes no public accessor for a composed kernel.
+    """
+    amplitude = 1.0
+    noise = 0.0
+    product = getattr(kernel, "k1", None)
+    additive = getattr(kernel, "k2", None)
+    if additive is not None and hasattr(additive, "noise_level"):
+        noise = float(additive.noise_level)
+    if product is not None:
+        constant = getattr(product, "k1", None)
+        if constant is not None and hasattr(constant, "constant_value"):
+            amplitude = float(constant.constant_value)
+    return float(np.sqrt(max(amplitude + noise, 1e-300)))
+
+
 def gpr_uncertainty(
     z_l2: sp.spmatrix,
     grid: NDArray[np.float64],
     coords: NDArray[np.float64],
     n_components: int = 10,
-) -> dict[str, NDArray[np.float64]]:
-    """Relative uncertainty from two GPR surrogates (Section 3.7, Eq. 19).
+) -> dict[str, Any]:
+    """Relative GPR uncertainty from two covariance assumptions (Eq. 19).
 
-    A Gaussian process is fitted on a truncated-SVD reduction of the L2
-    representation and its predictive standard deviation is evaluated on the
-    grid. Two covariance assumptions are used - an anisotropic-baseline RBF and a
-    Matern-3/2 - and their low-uncertainty scores are averaged into ``R``.
+    The surrogate follows the foundational paper's Section 5.1 exactly:
 
-    Hyperparameters are held fixed at a data-derived length scale instead of
-    being optimized. Letting the marginal likelihood choose the length scale
-    drove it to the lower bound: the GP then memorizes the 120 training points,
-    giving near-zero std inside the sample and a spike outside it, which is a
-    property of the optimizer rather than of the manifold. A fixed scale of one
-    median inter-document distance keeps the field monotone in "distance from
-    supporting evidence", which is the diagnostic the paper actually uses.
+    * the L2 representation is compressed to ``n_components = 10`` latent
+      dimensions by truncated SVD (``random_state=0``);
+    * the kernel is the anisotropic RBF of Eq. 19,
+      ``c0 exp[-1/2((x-x')^2/lx^2 + (y-y')^2/ly^2)] + c_white delta(y,y')``,
+      with ``c0``, ``lx``, ``ly`` and ``c_white`` fitted by marginal likelihood
+      (``n_restarts_optimizer=10``, ``random_state=0``, ``normalize_y=False``);
+    * a Matern-3/2 kernel is fitted independently as the sensitivity model.
+
+    The reported field is the *relative* uncertainty
+    ``u(x) = sigma_post(x) / sigma_prior`` of Section 5.2, not an absolute
+    standard deviation.  A multi-output GP on the SVD scores shares one kernel
+    and therefore one posterior variance for every target, so ``sigma_post`` is
+    read from a single target column; summing over the 10 identical columns
+    would inflate it by ``sqrt(10)``.
 
     ``R`` is a reliability diagnostic only and is deliberately excluded from the
     Pareto objectives (Section 4.3): maximizing low uncertainty would favour
@@ -663,42 +1082,63 @@ def gpr_uncertainty(
     components = max(1, min(n_components, n_documents - 1, n_features - 1))
     reduced = TruncatedSVD(n_components=components, random_state=0).fit_transform(z_l2)
 
-    pairwise = pairwise_distances(coords, coords)
-    upper = pairwise[np.triu_indices_from(pairwise, k=1)]
-    length_scale = float(np.median(upper)) if upper.size else 1.0
-    length_scale = max(length_scale, 1e-3)
-    LOGGER.info(
-        "GPR diagnostic: fixed length_scale=%.4f (median inter-document distance), "
-        "%d SVD components",
-        length_scale,
-        components,
-    )
+    # Eq. 19's fitted length scales are ~0.6 on the [-1, 1]^2 chart, which is
+    # also a sensible starting point; the marginal likelihood moves from there.
+    # One value per input dimension makes the RBF anisotropic, as Eq. 19
+    # requires; sklearn's stub under-declares ``length_scale`` as float-only.
+    initial_length_scale: Any = [0.6, 0.6]
 
-    def predictive_std(kernel: object) -> NDArray[np.float64]:
+    def relative_uncertainty(
+        kernel: object,
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64], float, str]:
         model = GaussianProcessRegressor(
             kernel=kernel,  # type: ignore[arg-type]
-            normalize_y=True,
-            alpha=1e-8,
-            # ``optimizer=None`` is the documented way to skip hyperparameter
-            # optimization (sklearn _gpr.py:64,81); the stub under-declares it as
-            # str-only. All bounds are "fixed" anyway, so fitting is a no-op.
-            optimizer=None,  # type: ignore[arg-type]
+            normalize_y=False,
+            alpha=0.0,
+            n_restarts_optimizer=10,
+            random_state=0,
         )
         model.fit(coords, reduced)
-        prediction = model.predict(grid, return_std=True)
-        std = np.asarray(prediction[1], dtype=np.float64)
-        return np.linalg.norm(std.reshape(len(grid), -1), axis=1)
+        std = np.asarray(model.predict(grid, return_std=True)[1], dtype=np.float64)
+        sigma_post = std.reshape(len(grid), -1)[:, 0]
+        sigma_prior = _kernel_prior_std(model.kernel_)
+        LOGGER.info(
+            "GPR diagnostic (%d SVD dims): sigma_prior=%.4f, sigma_post in "
+            "[%.4f, %.4f]",
+            components,
+            sigma_prior,
+            float(sigma_post.min()),
+            float(sigma_post.max()),
+        )
+        return (
+            sigma_post / sigma_prior,
+            sigma_post,
+            sigma_prior,
+            str(model.kernel_),
+        )
 
-    base = ConstantKernel(1.0, constant_value_bounds="fixed")
-    noise = WhiteKernel(noise_level=1e-6, noise_level_bounds="fixed")
-    u_rbf = predictive_std(
-        base * RBF(length_scale=length_scale, length_scale_bounds="fixed") + noise
-    )
-    u_matern = predictive_std(
-        base * Matern(length_scale=length_scale, nu=1.5, length_scale_bounds="fixed")
-        + noise
-    )
-    return {"u_rbf": u_rbf, "u_matern": u_matern, "u_mean": 0.5 * (u_rbf + u_matern)}
+    base = ConstantKernel(1.0)
+    noise = WhiteKernel(1e-3)
+    # ``cast`` is only to satisfy sklearn's stub, which declares the
+    # anisotropic ``length_scale`` as float-only.
+    anisotropy = cast(float, initial_length_scale)
+    rbf = base * RBF(length_scale=anisotropy) + noise
+    u_rbf, post_rbf, prior_rbf, kernel_rbf = relative_uncertainty(rbf)
+    LOGGER.info("GPR RBF kernel: %s", kernel_rbf)
+    matern = base * Matern(length_scale=anisotropy, nu=1.5) + noise
+    u_matern, post_matern, prior_matern, kernel_matern = relative_uncertainty(matern)
+    LOGGER.info("GPR Matern-3/2 kernel: %s", kernel_matern)
+    return {
+        "u_rbf": u_rbf,
+        "u_matern": u_matern,
+        "u_mean": 0.5 * (u_rbf + u_matern),
+        "sigma_post_rbf": post_rbf,
+        "sigma_post_matern": post_matern,
+        "sigma_prior_rbf": float(prior_rbf),
+        "sigma_prior_matern": float(prior_matern),
+        "kernel_rbf": kernel_rbf,
+        "kernel_matern": kernel_matern,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -772,20 +1212,35 @@ def compute_objectives(
     grid_size = int(manifold_cfg.get("grid_size", 21))
     spacing = float((float(bounds_cfg[1]) - float(bounds_cfg[0])) / (grid_size - 1))
 
-    h_global = float(manifold_cfg.get("sph_h", 0.25))
+    h_global = np.asarray(manifold_cfg.get("sph_h", 0.0), dtype=np.float64)
     nearest_k = int(manifold_cfg.get("nearest_k", 8))
+    percentiles = _percentile_pair(manifold_cfg)
+    gradient_delta = float(manifold_cfg.get("gradient_delta", GRADIENT_DELTA))
 
-    # Two smoothing schemes: one scale over the whole map, and one scale per
-    # document from its own 8th-nearest neighbour.
-    w_global = sph_weights(grid, coords, h_global)
+    # Eq. 9: one smoothing length per query point, h(x) = max_i r_i(x) / 1.98,
+    # so every document contributes to the global field.  An explicit
+    # ``manifold.sph_h`` replaces the derived scale (a fixed bandwidth is the
+    # `scatter` form of the same kernel and is not what the paper specifies).
+    h_grid = (
+        sph_bandwidth(grid, coords)
+        if float(h_global) <= 0.0
+        else np.full(len(grid), float(h_global))
+    )
+    # Section 5.4: the adaptive field takes its local scale from each document's
+    # eight nearest neighbours.
     h_documents = document_bandwidth(coords, nearest_k)
+    w_global = sph_weights(grid, coords, h_grid)
     w_adaptive = sph_weights_adaptive(grid, coords, h_documents)
     LOGGER.info(
-        "SPH bandwidth: global h=%.4f; adaptive h_i in [%.4f, %.4f] (median %.4f)",
-        h_global,
+        "SPH bandwidth (Eq. 9): global h in [%.4f, %.4f] (median %.4f); "
+        "adaptive h_i in [%.4f, %.4f] (median %.4f, k=%d)",
+        float(h_grid.min()),
+        float(h_grid.max()),
+        float(np.median(h_grid)),
         float(h_documents.min()),
         float(h_documents.max()),
         float(np.median(h_documents)),
+        nearest_k,
     )
 
     gram = gram_matrix(representation.z_l2)
@@ -802,7 +1257,7 @@ def compute_objectives(
         weights = w_global if scheme == "global" else w_adaptive
         mixture = normalized_mixture(weights, labels[k], k)
         entropy, gap = boundary_strength(mixture)
-        views[name] = boundary_score(entropy, gap)
+        views[name] = boundary_score(entropy, gap, percentiles=percentiles)
         entropies[name] = entropy
         gaps[name] = gap
         mixtures[name] = mixture
@@ -830,13 +1285,15 @@ def compute_objectives(
     quantiles = empirical_dnn_quantiles(d_nn, config)
     whitespace = band_pass_whitespace(d_nn, quantiles)
 
-    gradient_raw = semantic_gradient(w_global, gram, grid_size, spacing)
-    gradient, p_gradient = normalize_percentile(gradient_raw)
+    # Eq. 14: central differences of the interpolated field at delta = 1e-3, not
+    # between neighbouring grid samples 0.1 apart.
+    gradient_raw = semantic_gradient_field(grid, coords, gram, delta=gradient_delta)
+    gradient, p_gradient = normalize_percentile(gradient_raw, percentiles=percentiles)
 
     n_eff, d5, top_three = support_statistics(w_global, grid, coords)
-    n_neff, p_neff = normalize_percentile(n_eff)
-    n_d5, p_d5 = normalize_percentile(d5)
-    n_t3, p_t3 = normalize_percentile(top_three)
+    n_neff, p_neff = normalize_percentile(n_eff, percentiles=percentiles)
+    n_d5, p_d5 = normalize_percentile(d5, percentiles=percentiles)
+    n_t3, p_t3 = normalize_percentile(top_three, percentiles=percentiles)
     support = (
         SUPPORT_W_NEFF * n_neff
         + SUPPORT_W_D5 * (1.0 - n_d5)
@@ -844,8 +1301,12 @@ def compute_objectives(
     )
 
     uncertainty_fields = gpr_uncertainty(representation.z_l2, grid, coords)
-    n_u_rbf, _ = normalize_percentile(uncertainty_fields["u_rbf"])
-    n_u_matern, _ = normalize_percentile(uncertainty_fields["u_matern"])
+    n_u_rbf, _ = normalize_percentile(
+        uncertainty_fields["u_rbf"], percentiles=percentiles
+    )
+    n_u_matern, _ = normalize_percentile(
+        uncertainty_fields["u_matern"], percentiles=percentiles
+    )
     reliability = 0.5 * (1.0 - n_u_rbf) + 0.5 * (1.0 - n_u_matern)
     uncertainty = uncertainty_fields["u_mean"]
     kernel_agreement = float(
@@ -903,6 +1364,7 @@ def compute_objectives(
         "weights_global": w_global,
         "weights_adaptive": w_adaptive,
         "h_documents": h_documents,
+        "h_global_grid": h_grid,
         "n_eff": n_eff,
         "d5": d5,
         "top3": top_three,
@@ -910,6 +1372,12 @@ def compute_objectives(
         "uncertainty": uncertainty,
         "uncertainty_rbf": uncertainty_fields["u_rbf"],
         "uncertainty_matern": uncertainty_fields["u_matern"],
+        "sigma_post_rbf": uncertainty_fields["sigma_post_rbf"],
+        "sigma_post_matern": uncertainty_fields["sigma_post_matern"],
+        "sigma_prior_rbf": uncertainty_fields["sigma_prior_rbf"],
+        "sigma_prior_matern": uncertainty_fields["sigma_prior_matern"],
+        "gpr_kernel_rbf": uncertainty_fields["kernel_rbf"],
+        "gpr_kernel_matern": uncertainty_fields["kernel_matern"],
         "reliability": reliability,
         "kernel_agreement": kernel_agreement,
         "mixture_regime": regime_mixture,
@@ -920,9 +1388,11 @@ def compute_objectives(
             "top3": p_t3,
         },
         "spacing": spacing,
-        "sph_h": h_global,
+        "sph_h": float(np.mean(h_grid)),
         "nearest_k": nearest_k,
         "grid_size": grid_size,
+        "norm_percentiles": percentiles,
+        "gradient_delta": gradient_delta,
         "baseline": distance_maximising_baseline(
             d_nn=d_nn,
             grid=grid,
@@ -966,6 +1436,7 @@ def save_grid(
         "weights_global": fields["weights_global"].astype(np.float32),
         "weights_adaptive": fields["weights_adaptive"].astype(np.float32),
         "h_documents": fields["h_documents"],
+        "h_global_grid": fields["h_global_grid"],
         "d_nn": fields["d_nn"],
         "d5": fields["d5"],
         "n_eff": fields["n_eff"],
@@ -974,6 +1445,12 @@ def save_grid(
         "uncertainty": fields["uncertainty"],
         "uncertainty_rbf": fields["uncertainty_rbf"],
         "uncertainty_matern": fields["uncertainty_matern"],
+        "sigma_post_rbf": fields["sigma_post_rbf"],
+        "sigma_post_matern": fields["sigma_post_matern"],
+        "sigma_prior_rbf": np.array([fields["sigma_prior_rbf"]]),
+        "sigma_prior_matern": np.array([fields["sigma_prior_matern"]]),
+        "gpr_kernel_rbf": np.array([fields["gpr_kernel_rbf"]]),
+        "gpr_kernel_matern": np.array([fields["gpr_kernel_matern"]]),
         "reliability": fields["reliability"],
         "kernel_agreement": np.array([fields["kernel_agreement"]]),
         "mixture_regime": fields["mixture_regime"],
@@ -989,6 +1466,8 @@ def save_grid(
         "spacing": np.array([fields["spacing"]]),
         "sph_h": np.array([fields["sph_h"]]),
         "nearest_k": np.array([fields["nearest_k"]]),
+        "norm_percentiles": np.array(fields["norm_percentiles"], dtype=np.float64),
+        "gradient_delta": np.array([fields["gradient_delta"]]),
     }
     for name, _, _ in VIEW_SPECS:
         archives[f"b_{name}"] = views[name]
@@ -1011,9 +1490,22 @@ def save_grid(
         "grid_points": len(fields["grid"]),
         "documents": int(manifold.coords.shape[0]),
         "spacing": fields["spacing"],
-        "sph_h_global": fields["sph_h"],
+        "sph_h_global_mean": fields["sph_h"],
+        "sph_h_global_range": [
+            float(fields["h_global_grid"].min()),
+            float(fields["h_global_grid"].max()),
+        ],
         "nearest_k_adaptive": fields["nearest_k"],
+        "norm_percentiles": list(fields["norm_percentiles"]),
+        "gradient_delta": fields["gradient_delta"],
+        "gpr_kernel_rbf": fields["gpr_kernel_rbf"],
+        "gpr_kernel_matern": fields["gpr_kernel_matern"],
+        "uncertainty": (
+            "relative: sigma_post / sigma_prior (Section 5.2), per Eq. 19 kernel"
+        ),
+        "sph_kernel": "cubic spline, Eq. 10; h from Eq. 9 (global) / 8-NN (adaptive)",
         "stress": manifold.stress,
+        "stress_definition": "E_stress of Eqs. 4-5 (normalised)",
         "distance_correlation": manifold.distance_correlation,
         "anchors": {
             "indices": [int(i) for i in manifold.anchor_index],
@@ -1098,6 +1590,19 @@ def verify_manifold(grid_npz: Path, expected_docs: int, expected_points: int) ->
         ok = False
     if not np.all(np.isfinite(weights)):
         LOGGER.error("SPH weight matrix contains non-finite values")
+        ok = False
+    if weights.min() < -1e-9:
+        LOGGER.error("SPH weights are negative (min %.3e)", weights.min())
+        ok = False
+    # Eq. 11: w_i = W(q_i) / sum_j W(q_j), so every row is a probability vector.
+    row_sum_drift = float(np.max(np.abs(weights.sum(axis=1) - 1.0)))
+    LOGGER.info("Eq. 11 weight-normalisation drift: %.3e", row_sum_drift)
+    if row_sum_drift > 1e-5:
+        LOGGER.error(
+            "SPH weight rows do not sum to 1 (max drift %.3e); Eq. 11 requires "
+            "normalised weights",
+            row_sum_drift,
+        )
         ok = False
 
     # Eq. 21 must be reconstructible from the stored views alone.

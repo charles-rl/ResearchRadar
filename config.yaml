@@ -19,7 +19,7 @@
 # Switching profile is one line.  Both profiles write the same artifact paths,
 # so a run in one mode replaces the other's corpus: commit or copy the outputs
 # you want to keep before switching back.
-profile: single_field
+profile: seed_first
 
 # Settings for `profile: single_field`.  Ignored in seed-first mode, so it can
 # stay filled in as a ready-to-run example.  Only `query`, `years_back, and
@@ -103,13 +103,16 @@ corpus:
     "biro biped.pdf": 1                                      # doc 11: Stoch BiRo hardware control
     "motor DR is more important than mass or inertia.pdf": 1 # doc 13: Static friction sim-to-real
     "spi active paper.pdf": 1                                # doc 14: Active exploration SysID
+    "2602.04412v3.pdf": 1  # HoRD: robust humanoid control, domain shift
 
-    # Regime 2: Dynamic Legged Control & Trajectory Optimization
-    "2012.06932v1.pdf": 2                                    # doc 1: CMA-ES warm starting
-    "2502.12555v1.pdf": 2                                    # doc 4: Contextual CMA-ES
-    "Feedback_Control_of_a_Cassie_Bipedal_Robot__Standing_and_Walking_Final.pdf": 2 # doc 6: Cassie feedback
-    "HIL_maybe_equation_for_judge_and_policy_can_be_applied_to_method.pdf": 2        # doc 7: Hybrid imitation
-    "cassie biped.pdf": 2                                    # doc 12: Cassie compliant walking
+    # Regime 2: Robot Arm Manipulation (replaced the retired legged-control
+    # regime). All four seeds below are pinned explicitly so the arm regime's
+    # centroid is not defined by similarity against a still partly legged
+    # regime 1.
+    "2404.12308v2.pdf": 2   # ASID: active exploration for SysID in manipulation
+    "2506.01844v1.pdf": 2   # SmolVLA: affordable vision-language-action model
+    "2605.02881v1.pdf": 2   # MolmoAct2: action reasoning models for deployment
+    "2610.36420.pdf": 2     # SO-101 Bench: accessible spatial manipulation
   # Reviewer flag: warn when the automatic similarity margin between the best
   # and second-best regime is below this value, i.e. the seed is ambiguous.
   seed_match_margin: 0.02
@@ -123,6 +126,16 @@ corpus:
   # Minimum abstract length in whitespace-delimited words.
   # Stubs/withdrawn records carry degenerate abstracts that corrupt the manifold.
   min_abstract_words: 40
+
+  # Hard exclusions by arXiv ID (version suffix ignored).  For withdrawn or
+  # duplicated records whose PDF no longer resolves: a 404 aborts the full-text
+  # stage *after* the selection quota is already fixed, so the only safe place
+  # to drop such a record is during the scan, where the regime backfills the
+  # slot with the next candidate.  Re-checked by `--verify-only` round-trips.
+  exclude_arxiv_ids:
+    # Withdrawn: comment reads "Duplication, resubmission of our previous paper
+    # arXiv:2504.06585"; v1 PDF still resolves but v2 returns 404.
+    - "2603.21853"
 
   # Review/survey exclusion keywords (Obayashi et al. 2026, Sec. 5.1).
   # Review articles intentionally aggregate broad areas of prior work and
@@ -167,29 +180,40 @@ regimes:
     name: "Sim-to-Real & Hardware Physics Adaptation"
     label: "Sim2Real-Physics"
     description: >-
-      Domain randomization, actuator dynamics, joint friction, system
-      identification, and sim-to-real transfer for legged systems.
-    query: '(abs:"sim-to-real" OR abs:"domain randomization") AND (abs:"friction" OR abs:"actuator" OR abs:"legged" OR abs:"system identification") AND cat:cs.RO'
+      Domain randomization, actuator dynamics, joint friction, contact
+      dynamics, system identification, and sim-to-real transfer for legged and
+      arm platforms.
+    query: >-
+      (abs:"sim-to-real" OR abs:"domain randomization")
+      AND (abs:"friction" OR abs:"actuator" OR abs:"contact dynamics"
+      OR abs:"contact-rich" OR abs:"system identification") AND cat:cs.RO
     keywords:
       - "sim-to-real"
       - "domain randomization"
       - "static friction"
       - "actuator"
+      - "contact dynamics"
       - "system identification"
 
   - id: 2
-    name: "Dynamic Legged Control & Trajectory Optimization"
-    label: "Legged-Control"
+    name: "Robot Arm Manipulation & Vision-Language-Action Policies"
+    label: "Arm-Manipulation"
     description: >-
-      Feedback control, dynamic walking, virtual constraints, compliance, and
-      evolutionary optimization (CMA-ES) for bipedal and legged robots.
-    query: '(abs:"bipedal" OR abs:"legged" OR abs:"cassie") AND (abs:"feedback control" OR abs:"walking" OR abs:"cma-es" OR abs:"virtual constraints") AND (cat:cs.RO OR cat:eess.SY)'
+      Learning-based robot arm manipulation: vision-language-action policies,
+      imitation learning, dexterous and bimanual grasping, manipulation
+      benchmarks, and sim-to-real transfer of arm controllers.
+    query: >-
+      (abs:"robot manipulation" OR abs:"dexterous manipulation"
+      OR abs:"robotic grasping" OR abs:"vision-language-action")
+      AND (abs:"manipulation policy" OR abs:"imitation learning"
+      OR abs:"reinforcement learning" OR abs:"policy learning"
+      OR abs:"sim-to-real") AND cat:cs.RO
     keywords:
-      - "bipedal robot"
-      - "dynamic walking"
-      - "feedback control"
-      - "cma-es"
-      - "compliance"
+      - "robot arm manipulation"
+      - "vision-language-action"
+      - "dexterous manipulation"
+      - "imitation learning"
+      - "robotic grasping"
 
 # Phase 1: full-text extraction (Obayashi et al. 2026, Sec. 5.2: "PDF text was
 # extracted without OCR").  The paper never relied on abstract-only text, and
@@ -269,8 +293,13 @@ manifold:
   grid_size: 21           # 21x21 = 441 evaluation points (Obayashi et al. Sec. 5.5)
   grid_output: "data/manifold_grid.npz"
   bounds: [-1.0, 1.0]     # Chart Omega = [-1, 1]^2 (Obayashi et al. Sec. 2.1)
-  sph_h: 0.25             # Kernel smoothing parameter
-  nearest_k: 8            # Adaptive neighborhood scale (Obayashi et al. Sec. 5.4)
+  # Eq. 9 derives the smoothing length at every query point,
+  #     h(x) = max_i ||x - x_i|| / 1.98,
+  # so all N documents sit inside the cubic-spline support (q < 2).  A positive
+  # value here instead PINS one fixed h, which is not what the paper specifies.
+  sph_h: 0.0
+  gradient_delta: 0.001   # Eq. 14: central-difference step for the Jacobian
+  nearest_k: 8            # Adaptive neighbourhood scale (Sec. 5.4)
   perimeter_anchors: 8    # + 1 central anchor = 9 gauge-fixing anchors (Sec. 5.2)
   norm_percentiles: [10, 90]     # N+ / N- normalization percentiles (Eqs. 9-10)
   use_empirical_quantiles: true  # recompute W() quantiles from this corpus's d_nn
@@ -287,6 +316,18 @@ pareto:
   objectives: ["P_boundary", "W", "G", "S"]
   ideal_point: [1.0, 1.0, 1.0, 1.0]
   archetype_radius: 0.35   # chart-space radius grouping front points into archetypes
+
+explorer:
+  # Phase 6: place ONE external document (a proposal, an abstract, a draft) on
+  # the finished chart.  This never joins the corpus: it is projected through
+  # the stored vocabulary, scored at its own coordinate with the grid's own
+  # kernels and percentile bounds, and written to its own artifact.  Nothing in
+  # data/ changes, so the map, the objectives, and the Pareto front are
+  # identical with or without it.
+  document: "docs/papers/Current_Research_Proposal.pdf"
+  label: "Your proposal"
+  output_path: "data/explorer_idea.json"
+  report_path: "output/IDEA_PLACEMENT.md"
 
 output:
   html_path: "output/radar_map.html"

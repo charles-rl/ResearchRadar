@@ -159,3 +159,84 @@ def test_grouping_covers_every_point_exactly_once() -> None:
     groups = group_archetypes(points, 0.25)
     seen = sorted(index for group in groups for index in group.tolist())
     assert seen == list(range(40))
+
+
+# --------------------------------------------------------------------------- #
+# Eqs. 23-25: the front against an independent brute-force reference
+# --------------------------------------------------------------------------- #
+def _brute_force_front(objectives: np.ndarray, white_space: np.ndarray) -> tuple[list[int], list[int]]:
+    """Explicit double loop over dominance, then Eq. 25's ``W > 0`` filter."""
+    dominated = [False] * len(objectives)
+    for victim in range(len(objectives)):
+        for other in range(len(objectives)):
+            if other == victim:
+                continue
+            no_worse = bool(np.all(objectives[other] >= objectives[victim]))
+            strictly_better = bool(np.any(objectives[other] > objectives[victim]))
+            if no_worse and strictly_better:
+                dominated[victim] = True
+                break
+    front = [index for index, flag in enumerate(dominated) if not flag]
+    practical = [index for index in front if white_space[index] > 0.0]
+    return front, practical
+
+
+def test_pareto_front_matches_a_bruteforce_reference() -> None:
+    rng = np.random.default_rng(41)
+    objectives = rng.random((90, 4))
+    # Force ties and duplicates so the "strictly better" clause is exercised.
+    objectives[10] = objectives[11]
+    objectives[20] = objectives[30]
+    white_space = np.where(rng.random(90) > 0.35, rng.random(90), 0.0)
+
+    front, practical = extract_pareto_front(objectives, white_space)
+    expected_front, expected_practical = _brute_force_front(objectives, white_space)
+
+    assert sorted(front.tolist()) == expected_front
+    assert sorted(practical.tolist()) == expected_practical
+
+
+def test_practical_front_members_are_mutually_non_dominated() -> None:
+    """No reported solution may dominate another one (Eq. 24 restricted to P)."""
+    rng = np.random.default_rng(43)
+    objectives = rng.random((120, 4))
+    white_space = np.where(rng.random(120) > 0.5, rng.random(120), 0.0)
+    _, practical = extract_pareto_front(objectives, white_space)
+    assert practical.size > 0
+    assert not dominance_mask(objectives[practical]).any()
+
+
+def test_white_space_filter_is_strictly_positive() -> None:
+    """Eq. 25 keeps ``W(x) > 0``; ``W(x) = 0`` is excluded, however small.
+
+    Each row here is best on exactly one objective, so all four are mutually
+    non-dominated and only the white-space filter can remove anything.
+    """
+    objectives = np.array(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    white_space = objectives[:, 1]
+    front, practical = extract_pareto_front(objectives, white_space)
+    assert sorted(front.tolist()) == [0, 1, 2, 3]
+    assert list(practical) == [1]
+    assert not dominance_mask(objectives).any()
+
+    # A tiny but positive W survives; exactly zero does not.
+    tiny = np.array([[1.0, 1e-12], [0.0, 0.0]])
+    assert list(extract_pareto_front(tiny, tiny[:, 1])[1]) == [0]
+    zero = np.array([[1.0, 0.0], [0.0, 0.0]])
+    assert extract_pareto_front(zero, zero[:, 1])[1].size == 0
+
+
+def test_every_non_dominated_point_with_white_space_is_practical() -> None:
+    rng = np.random.default_rng(47)
+    objectives = rng.random((60, 4))
+    white_space = rng.random(60)
+    front, practical = extract_pareto_front(objectives, white_space)
+    assert practical.size == front.size
+    assert np.array_equal(practical, front)

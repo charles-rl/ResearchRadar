@@ -180,14 +180,20 @@ by different models. The cache keys on `model`, so switching forces a re-embed.
   evidence than the point they were attached to. `src/report.py` now aggregates
   the n-gram scores through `WordIndex.feature_family`, so both views share one
   basis.
-- **`np.gradient`'s analytic shortcut is wrong here.** Deriving
-  `∂v/∂x` as `(I - vvᵀ) ∂A/∂x / ||A||` is first-order correct and matched a hand
-  derived reference, but it disagreed with a discrete central difference of `v`
-  by a factor of four (21.83 vs 5.55) because `v(x) = normalize(Σ wᵢ zᵢ)` is
-  nonlinear. The paper says "Jacobian", i.e. a derivative of `v` itself, so
-  `semantic_gradient` now evaluates the central difference exactly through the
-  Gram matrix: `cos(v_a, v_b) = (w_aᵀ K w_b)/(n_a n_b)`, `‖v_a-v_b‖² = 2-2cos`,
-  `‖dv/dx‖ = sqrt(2-2cos)/step`. It matches a dense brute force to 6e-11.
+- **The gradient must be the central difference of `v`, not a grid stencil.**
+  `v(x) = normalize(Σ wᵢ zᵢ)` is nonlinear, so the estimator has to be a
+  difference of field *values*. `semantic_gradient_field` evaluates the field at
+  `x ± δ` with Eq. 14's `δ = 1e-3` (recomputing Eq. 9's bandwidth there, because
+  `h` is part of the field's definition), and uses the Gram identity
+  `cos(v_a, v_b) = (w_aᵀ K w_b)/(n_a n_b)`, `‖v_a-v_b‖² = 2-2cos` so the
+  250,000-dimensional vector is never materialised. It matches a dense brute
+  force to ~1e-7 relative. The earlier version took the difference between
+  neighbouring **grid** samples 0.1 apart, which is a different (coarser)
+  estimator; `semantic_gradient` still exposes it for callers that only have
+  field samples. The claim that `(I - vvᵀ) ∂A/∂x / ||A||` is "only first-order"
+  was wrong — it is the exact derivative of the normalised field, and it agrees
+  with the δ = 1e-3 difference to 1e-6; the "factor of four" came from a buggy
+  hand-derived reference, not from the formula.
 - **Counting n-grams instead of words saturates `df`.** See the limitation above.
   The symptom is suspiciously round: every family reports `df = 120`.
 - **A corpus-MD5 cache key is not enough.** Changing `ngram_range` or the family
@@ -252,10 +258,20 @@ because a reader will otherwise expect more certainty than they can give.
   of "is dominated" and flags 439 of 441 points. The correct order is
   `dominator = objectives[:, None, :]`, `victim = objectives[None, :, :]`.
   `src.pareto --verify-only` re-checks the front with a brute-force loop.
-- **GPR hyperparameter optimization runs to the bound.** Letting scikit-learn
-  fit the RBF length scale drove it to its lower bound and produced a degenerate
-  `R = 1.0` everywhere. The kernel is now pinned to the median inter-document
-  distance with all bounds `"fixed"`, which is deterministic and honest.
+- **GPR must report `σ_post / σ_prior`, not the norm over latent targets.** The
+  multi-output GP on the 10 SVD scores shares one kernel, so all ten target
+  columns have the *same* posterior standard deviation; `norm(std, axis=1)` was
+  therefore `√10 · σ_post`, and applying `N_−` to that absolute value made the
+  "relative uncertainty" reported in the evidence package not relative at all.
+  The field is now `σ_post / σ_prior` with `σ_prior = sqrt(c₀ + c_white)`, which
+  reproduces the paper's `u = 0.222` semantics.
+- **Fitting the GPR kernel with sklearn's default bounds is stable here.** An
+  earlier attempt pinned every hyperparameter to the median inter-document
+  distance after an unconstrained fit collapsed to `R = 1.0` everywhere. With
+  the paper's Eq. 19 model (anisotropic RBF + white noise, `normalize_y=False`,
+  `n_restarts_optimizer=10`, `random_state=0`) the fit lands at
+  `ℓ ≈ [0.52, 0.61]`, close to the paper's `[0.628, 0.538]`, and the relative
+  uncertainty spans a useful range instead of saturating.
 - **The Appendix A.1 template's last line ends in a space.** Calling `.rstrip()`
   on the extracted text made the rendered prompt differ from the paper and the
   verbatim check failed. The template is now copied byte-for-byte.

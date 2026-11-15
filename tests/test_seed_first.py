@@ -188,6 +188,93 @@ def test_empty_front_matter_is_survivable() -> None:
     assert parse_seed_metadata("") == ("", [])
 
 
+def test_markup_between_names_keeps_them_separate() -> None:
+    """NeurIPS-style ``Name∗ 1 Name∗ 2`` blocks: markup is a separator."""
+    front = (
+        "HoRD: Robust Humanoid Control\n"
+        "\n"
+        "Puyue Wang∗ 1 Jiawei Hu∗ 2 Yan Gao 3\n"
+        "\n"
+        "Gillian Dobbie 1 Tao Gu 5\n"
+    )
+    title, authors = parse_seed_metadata(front)
+    assert title == "HoRD: Robust Humanoid Control"
+    assert authors == [
+        "Puyue Wang",
+        "Jiawei Hu",
+        "Yan Gao",
+        "Gillian Dobbie",
+        "Tao Gu",
+    ]
+
+
+def test_contribution_glyph_is_stripped_from_authors() -> None:
+    front = (
+        "MolmoAct2\n"
+        "Action Reasoning Models\n"
+        "\n"
+        "Haoquan Fang♥1,2∗\n"
+        "Shirui Chen♥1,2\n"
+        "\n"
+        "1Allen Institute for AI, 2University of Washington\n"
+    )
+    _, authors = parse_seed_metadata(front)
+    assert authors == ["Haoquan Fang", "Shirui Chen"]
+
+
+def test_camel_glued_author_grid_is_split() -> None:
+    """A merged author column (``DonovanClay``) still yields two names."""
+    front = (
+        "MolmoAct2\n"
+        "Action Reasoning Models\n"
+        "\n"
+        "DonovanClay♥1,2\n"
+        "SamWang♥1,4\n"
+        "\n"
+        "1Allen Institute for AI\n"
+    )
+    _, authors = parse_seed_metadata(front)
+    assert authors == ["Donovan Clay", "Sam Wang"]
+
+
+def test_organisation_is_not_an_author() -> None:
+    front = (
+        "SO-101 Bench\n"
+        "Accessible Spatial Manipulation\n"
+        "\n"
+        "Truman Hickok\n"
+        "Hugging Face\n"
+    )
+    _, authors = parse_seed_metadata(front)
+    assert authors == ["Truman Hickok"]
+
+
+def test_hyphen_broken_title_is_rejoined() -> None:
+    """A word split across title lines must not keep the line-break hyphen."""
+    front = (
+        "ASID: ACTIVE EXPLORATION FOR SYSTEM IDENTIFI-\n"
+        "CATION IN ROBOTIC MANIPULATION\n"
+        "\n"
+        "Mengda Xu\n"
+    )
+    title, authors = parse_seed_metadata(front)
+    assert title == (
+        "ASID: ACTIVE EXPLORATION FOR SYSTEM IDENTIFICATION IN ROBOTIC "
+        "MANIPULATION"
+    )
+    assert authors == ["Mengda Xu"]
+
+
+def test_in_line_hyphenation_survives_title_join() -> None:
+    front = (
+        "Vision-Language-Action Models for Robot Arms\n"
+        "\n"
+        "Jane Doe\n"
+    )
+    title, _ = parse_seed_metadata(front)
+    assert title == "Vision-Language-Action Models for Robot Arms"
+
+
 # --------------------------------------------------------------------------- #
 # Seed abstract
 # --------------------------------------------------------------------------- #

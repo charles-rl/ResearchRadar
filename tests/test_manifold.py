@@ -14,15 +14,23 @@ import scipy.sparse as sp
 
 from src.manifold import (
     ANCHOR_RADIUS,
+    ENTROPY_EPSILON,
+    GRADIENT_DELTA,
     OBJECTIVE_NAMES,
+    SMOOTHING_SUPPORT_RATIO,
+    TARGET_VARIANCE,
+    anchor_scale,
     band_pass_whitespace,
     boundary_score,
     boundary_strength,
     build_grid,
     classical_mds,
     cluster_labels,
+    constrained_stress,
     cosine_distance_matrix,
+    cubic_spline_kernel,
     document_bandwidth,
+    gpr_uncertainty,
     gram_matrix,
     normalize_percentile,
     normalized_mixture,
@@ -30,8 +38,11 @@ from src.manifold import (
     persistent_boundary,
     select_anchors,
     semantic_gradient,
+    semantic_gradient_field,
+    sph_bandwidth,
     sph_weights,
     sph_weights_adaptive,
+    stress_energy,
     support_statistics,
 )
 
@@ -220,15 +231,17 @@ def test_adaptive_kernel_weights_a_sparse_document_more_widely() -> None:
 
 def test_document_bandwidth_is_the_eighth_nearest_neighbour() -> None:
     # Documents on a line at x = 0..9. The self-distance is excluded, so
-    # ``nearest_k=8`` selects the 8th nearest *other* document.
+    # ``nearest_k=8`` selects the 8th nearest *other* document, divided by 1.98
+    # so that neighbour sits just inside the cubic-spline support (Eq. 9's
+    # convention, applied to the adaptive field).
     coords = np.column_stack([np.arange(10, dtype=float), np.zeros(10)])
     bandwidth = document_bandwidth(coords, nearest_k=8)
     # Edge documents see only one direction: distances 1..9 -> 8th is 8.
-    assert bandwidth[0] == pytest.approx(8.0)
-    assert bandwidth[9] == pytest.approx(8.0)
+    assert bandwidth[0] == pytest.approx(8.0 / SMOOTHING_SUPPORT_RATIO)
+    assert bandwidth[9] == pytest.approx(8.0 / SMOOTHING_SUPPORT_RATIO)
     # A central document has neighbours on both sides: 1,1,2,2,3,3,4,4 -> 4.
-    assert bandwidth[4] == pytest.approx(4.0)
-    assert bandwidth[5] == pytest.approx(4.0)
+    assert bandwidth[4] == pytest.approx(4.0 / SMOOTHING_SUPPORT_RATIO)
+    assert bandwidth[5] == pytest.approx(4.0 / SMOOTHING_SUPPORT_RATIO)
 
 
 def test_document_bandwidth_is_positive_even_for_coincident_points() -> None:
@@ -352,3 +365,403 @@ def test_semantic_gradient_rejects_a_mismatched_grid() -> None:
 # --------------------------------------------------------------------------- #
 def test_objective_names_are_the_four_pareto_axes() -> None:
     assert OBJECTIVE_NAMES == ("P_boundary", "W", "G", "S")
+
+
+# --------------------------------------------------------------------------- #
+# Eq. 10: the cubic-spline kernel
+# --------------------------------------------------------------------------- #
+def test_cubic_spline_kernel_matches_eq_10() -> None:
+    """Piecewise values, including the continuity point q = 1."""
+    q = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 3.0])
+    weight = cubic_spline_kernel(q)
+    assert weight[0] == pytest.approx(1.0)
+    # 1 - 3/2 q^2 + 3/4 q^3 at q = 1/2.
+    assert weight[1] == pytest.approx(1.0 - 1.5 * 0.25 + 0.75 * 0.125)
+    # Both branches meet at q = 1: inner gives 1/4, outer gives (2-1)^3/4.
+    assert weight[2] == pytest.approx(0.25)
+    assert weight[3] == pytest.approx(0.25 * (2.0 - 1.5) ** 3)
+    # Compact support: W(q) = 0 for q >= 2.
+    assert weight[4] == 0.0
+    assert weight[5] == 0.0
+
+
+def test_cubic_spline_kernel_is_continuous_and_monotone() -> None:
+    q = np.linspace(0.0, 2.0, 2001)
+    weight = cubic_spline_kernel(q)
+    assert weight.min() >= 0.0
+    # W is non-increasing: a farther document never receives more weight.
+    assert np.all(np.diff(weight) <= 1e-12)
+    # Continuity at the branch point (no jump larger than the sampling step).
+    left = cubic_spline_kernel(np.array([1.0 - 1e-9]))[0]
+    right = cubic_spline_kernel(np.array([1.0 + 1e-9]))[0]
+    assert left == pytest.approx(right, abs=1e-8)
+
+
+# --------------------------------------------------------------------------- #
+# Eqs. 9-11: smoothing length and weight normalisation
+# --------------------------------------------------------------------------- #
+def test_sph_bandwidth_puts_the_farthest_document_at_q_one_point_nine_eight() -> None:
+    """Eq. 9: h = max_i r_i / 1.98, so q_max = 1.98 < 2 and all N contribute."""
+    rng = np.random.default_rng(2)
+    coords = rng.uniform(-0.9, 0.9, size=(15, 2))
+    grid = build_grid({"manifold": {"grid_size": 7, "bounds": [-1.0, 1.0]}})
+    bandwidth = sph_bandwidth(grid, coords)
+    ratio = pairwise_distances(grid, coords).max(axis=1) / bandwidth
+    assert np.allclose(ratio, SMOOTHING_SUPPORT_RATIO)
+    # Every document therefore receives non-zero weight at every grid point.
+    weights = sph_weights(grid, coords, bandwidth)
+    assert np.all(weights > 0.0)
+
+
+def test_sph_weights_are_a_probability_vector() -> None:
+    """Eq. 11: w_i = W(q_i) / sum_j W(q_j), so each row sums to one."""
+    rng = np.random.default_rng(4)
+    coords = rng.uniform(-0.9, 0.9, size=(20, 2))
+    grid = build_grid({"manifold": {"grid_size": 9, "bounds": [-1.0, 1.0]}})
+    weights = sph_weights(grid, coords, sph_bandwidth(grid, coords))
+    assert np.allclose(weights.sum(axis=1), 1.0)
+    assert weights.min() >= 0.0
+    # Eq. 16 then satisfies 1 <= N_eff <= N.
+    n_eff = 1.0 / np.sum(weights**2, axis=1)
+    assert n_eff.min() >= 1.0 - 1e-9
+    assert n_eff.max() <= coords.shape[0] + 1e-9
+
+
+def test_sph_weights_are_the_normalised_kernel_exactly() -> None:
+    rng = np.random.default_rng(12)
+    coords = rng.uniform(-0.8, 0.8, size=(9, 2))
+    grid = np.array([[0.1, 0.2], [-0.7, 0.6]])
+    bandwidth = np.array([0.4, 0.9])
+    raw = cubic_spline_kernel(
+        pairwise_distances(grid, coords) / bandwidth.reshape(-1, 1)
+    )
+    expected = raw / raw.sum(axis=1, keepdims=True)
+    assert np.allclose(sph_weights(grid, coords, bandwidth), expected)
+
+
+def test_adaptive_bandwidth_limits_support_to_the_eight_nearest() -> None:
+    """h_i = d_(8,i)/1.98 puts document i's 8th neighbour just inside support.
+
+    Checked on document i's own kernel, which is the scale ``h_i`` defines: the
+    8th neighbour sits at ``q = 1.98 < 2`` and the 9th outside ``q >= 2``.
+    Neighbouring kernels may still reach the same point, which is what makes the
+    adaptive field smooth rather than a hard 8-nearest-neighbour rule.
+    """
+    rng = np.random.default_rng(6)
+    coords = rng.uniform(-0.9, 0.9, size=(25, 2))
+    bandwidth = document_bandwidth(coords, nearest_k=8)
+    distances = pairwise_distances(coords[:1], coords)[0]
+    distances[0] = np.inf  # exclude the document itself
+    ordered = np.sort(distances)
+    q = ordered / bandwidth[0]
+    assert q[7] == pytest.approx(SMOOTHING_SUPPORT_RATIO)
+    assert q[8] > 2.0
+    # At its own location the document's kernel is W(0) = 1, the maximum, so it
+    # carries the largest normalised weight (it need not be 1: neighbouring
+    # kernels with wide h_j also reach the point, which is what Eq. 11 divides by).
+    weights = sph_weights_adaptive(coords[:1], coords, bandwidth)
+    assert float(weights[0].sum()) == pytest.approx(1.0)
+    assert int(np.argmax(weights[0])) == 0
+    assert weights[0, 0] > 1.0 / coords.shape[0]
+
+
+def test_sph_weights_fall_back_to_the_nearest_document() -> None:
+    """An empty kernel support is the h -> 0 limit: the nearest document alone."""
+    grid = np.array([[5.0, 5.0]])
+    coords = np.array([[0.0, 0.0], [1.0, 1.0]])
+    weights = sph_weights(grid, coords, 1e-4)
+    assert weights[0, 1] == pytest.approx(1.0)
+    assert weights[0, 0] == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Eq. 7: entropy with the epsilon inside the logarithm
+# --------------------------------------------------------------------------- #
+def test_boundary_strength_entropy_matches_eq_7() -> None:
+    mixture = np.array([[0.5, 0.3, 0.2]])
+    entropy, gap = boundary_strength(mixture)
+    expected = -float(np.sum(mixture * np.log(mixture + ENTROPY_EPSILON))) / np.log(3)
+    assert float(entropy[0]) == pytest.approx(expected)
+    assert float(gap[0]) == pytest.approx(0.2)
+
+
+def test_boundary_strength_rejects_a_single_cluster() -> None:
+    """Eq. 7 divides by log K, which is zero at K = 1."""
+    with pytest.raises(ValueError):
+        boundary_strength(np.ones((1, 1)))
+
+
+# --------------------------------------------------------------------------- #
+# Eqs. 9-10: configurable percentile normalisation
+# --------------------------------------------------------------------------- #
+def test_normalize_percentile_honours_the_configured_pair() -> None:
+    values = np.linspace(0.0, 100.0, 101)
+    normalized, bounds = normalize_percentile(values, percentiles=(0.0, 100.0))
+    assert bounds == (0.0, 100.0)
+    assert float(normalized[0]) == pytest.approx(0.0)
+    assert float(normalized[100]) == pytest.approx(1.0)
+    assert float(normalized[50]) == pytest.approx(0.5)
+
+
+# --------------------------------------------------------------------------- #
+# Eq. 12: the trapezoid is exactly piecewise linear
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("fraction", [0.0, 0.25, 0.5, 0.75, 1.0])
+def test_band_pass_whitespace_rising_edge_is_linear(fraction: float) -> None:
+    q20, q60 = 0.05, 0.10
+    quantiles = {"q20": q20, "q60": q60, "q85": 0.14, "q98": 0.20}
+    value = band_pass_whitespace(
+        np.array([q20 + fraction * (q60 - q20)]), quantiles
+    )
+    assert float(value[0]) == pytest.approx(fraction)
+
+
+@pytest.mark.parametrize("fraction", [0.0, 0.25, 0.5, 0.75, 1.0])
+def test_band_pass_whitespace_falling_edge_is_linear(fraction: float) -> None:
+    q85, q98 = 0.14, 0.20
+    quantiles = {"q20": 0.05, "q60": 0.10, "q85": q85, "q98": q98}
+    value = band_pass_whitespace(
+        np.array([q98 - fraction * (q98 - q85)]), quantiles
+    )
+    assert float(value[0]) == pytest.approx(fraction)
+
+
+# --------------------------------------------------------------------------- #
+# Eqs. 13-15: the Jacobian at Eq. 14's step, against a dense brute force
+# --------------------------------------------------------------------------- #
+def test_semantic_gradient_field_matches_dense_central_differences() -> None:
+    """Eq. 14 taken literally: central differences of the normalised field.
+
+    The dense reference materialises ``v`` at ``x +/- delta`` using the *same*
+    Eq. 9 bandwidth rule and normalises explicitly, so this checks the Gram-based
+    inner-product shortcut against the definition rather than against itself.
+    """
+    rng = np.random.default_rng(21)
+    n_documents, n_features = 7, 25
+    dense = np.abs(rng.normal(size=(n_documents, n_features)))
+    dense /= np.linalg.norm(dense, axis=1, keepdims=True)
+    coords = rng.uniform(-0.7, 0.7, size=(n_documents, 2))
+    gram = gram_matrix(sp.csr_matrix(dense))
+
+    grid = build_grid({"manifold": {"grid_size": 5, "bounds": [-1.0, 1.0]}})
+    delta = GRADIENT_DELTA
+
+    def field_at(points: np.ndarray) -> np.ndarray:
+        weights = sph_weights(points, coords, sph_bandwidth(points, coords))
+        vectors = weights @ dense
+        return vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
+
+    expected = np.zeros(len(grid))
+    for axis in range(2):
+        plus = grid.copy()
+        plus[:, axis] += delta
+        minus = grid.copy()
+        minus[:, axis] -= delta
+        difference = field_at(plus) - field_at(minus)
+        expected += np.sum(difference**2, axis=1) / (2.0 * delta) ** 2
+    expected = np.sqrt(expected)
+
+    computed = semantic_gradient_field(grid, coords, gram, delta=delta)
+    assert np.allclose(computed, expected, rtol=1e-6, atol=1e-9)
+
+
+def test_semantic_gradient_field_is_zero_for_a_uniform_field() -> None:
+    coords = np.array([[0.0, 0.0], [0.5, 0.5], [-0.5, -0.4]])
+    document = np.array([[0.6, 0.8]])
+    gram = gram_matrix(sp.csr_matrix(np.repeat(document, 3, axis=0)))
+    grid = np.array([[0.0, 0.0], [0.3, -0.2], [-0.6, 0.7]])
+    gradient = semantic_gradient_field(grid, coords, gram)
+    assert np.allclose(gradient, 0.0, atol=1e-9)
+
+
+def test_semantic_gradient_field_is_non_negative() -> None:
+    rng = np.random.default_rng(31)
+    dense = np.abs(rng.normal(size=(6, 18)))
+    dense /= np.linalg.norm(dense, axis=1, keepdims=True)
+    coords = rng.uniform(-0.6, 0.6, size=(6, 2))
+    grid = rng.uniform(-1.0, 1.0, size=(11, 2))
+    gradient = semantic_gradient_field(grid, coords, gram_matrix(sp.csr_matrix(dense)))
+    assert gradient.shape == (11,)
+    assert np.all(gradient >= 0.0)
+    assert gradient.max() > 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Eqs. 16-18: support identities
+# --------------------------------------------------------------------------- #
+def test_support_score_weights_sum_to_one_and_stay_in_the_unit_interval() -> None:
+    rng = np.random.default_rng(8)
+    weights = rng.uniform(0.0, 1.0, size=(40, 15))
+    grid = rng.uniform(-1.0, 1.0, size=(40, 2))
+    coords = rng.uniform(-1.0, 1.0, size=(15, 2))
+    n_eff, d5, top3 = support_statistics(weights, grid, coords)
+    n_neff, _ = normalize_percentile(n_eff)
+    n_d5, _ = normalize_percentile(d5)
+    n_t3, _ = normalize_percentile(top3)
+    support = 0.40 * n_neff + 0.30 * (1.0 - n_d5) + 0.30 * (1.0 - n_t3)
+    assert np.all(support >= 0.0)
+    assert np.all(support <= 1.0)
+    assert np.allclose(0.40 + 0.30 + 0.30, 1.0)
+
+
+# --------------------------------------------------------------------------- #
+# Foundational Eqs. 4-8: the stress objective
+# --------------------------------------------------------------------------- #
+def _random_distances(rng: np.random.Generator, n: int) -> np.ndarray:
+    points = rng.uniform(-1.0, 1.0, size=(n, 2))
+    distances = pairwise_distances(points, points)
+    return distances / distances.max()
+
+
+def test_stress_energy_gradient_matches_finite_differences() -> None:
+    """The analytic gradient must match a numeric one on every free coordinate."""
+    rng = np.random.default_rng(17)
+    n = 8
+    coords = rng.uniform(-0.9, 0.9, size=(n, 2))
+    distances = _random_distances(rng, n)
+    anchors = np.array([0, 3], dtype=np.int64)
+
+    _, gradient, _ = stress_energy(coords, distances, anchors, alpha=0.8)
+    free = np.setdiff1d(np.arange(n), anchors)
+    step = 1e-6
+    numeric = np.zeros((n, 2))
+    for index in free:
+        for axis in range(2):
+            plus = coords.copy()
+            plus[index, axis] += step
+            minus = coords.copy()
+            minus[index, axis] -= step
+            j_plus, _, _ = stress_energy(plus, distances, anchors, alpha=0.8)
+            j_minus, _, _ = stress_energy(minus, distances, anchors, alpha=0.8)
+            numeric[index, axis] = (j_plus - j_minus) / (2.0 * step)
+
+    assert np.allclose(gradient[free], numeric[free], rtol=1e-5, atol=1e-6)
+    # Anchors are held fixed, so their gradient entries are exactly zero.
+    assert np.all(gradient[anchors] == 0.0)
+
+
+def test_stress_energy_is_the_normalised_stress_plus_regularisers() -> None:
+    rng = np.random.default_rng(19)
+    n = 9
+    coords = rng.uniform(-0.9, 0.9, size=(n, 2))
+    distances = _random_distances(rng, n)
+    anchors = np.array([0], dtype=np.int64)
+    total, _, components = stress_energy(coords, distances, anchors, alpha=0.5)
+
+    embedded = pairwise_distances(coords, coords)
+    mask = np.triu(np.ones((n, n), dtype=bool), k=1)
+    scaled = 0.5 * distances
+    expected_stress = np.sum((embedded[mask] - scaled[mask]) ** 2) / np.sum(
+        scaled[mask] ** 2
+    )
+    assert components["stress"] == pytest.approx(expected_stress)
+    assert total == pytest.approx(
+        components["stress"]
+        + 0.10 * components["repulsion"]
+        + 0.05 * components["variance"]
+        + 0.01 * components["centring"]
+    )
+
+
+def test_variance_energy_is_zero_at_the_target_variance() -> None:
+    """E_var targets var = 1/3 per axis, the variance of U[-1, 1]."""
+    offset = np.sqrt(TARGET_VARIANCE)
+    coords = np.array(
+        [
+            [-offset, -offset],
+            [offset, -offset],
+            [-offset, offset],
+            [offset, offset],
+        ]
+    )
+    assert np.allclose(coords.var(axis=0), TARGET_VARIANCE)
+    distances = pairwise_distances(coords, coords)
+    _, _, components = stress_energy(coords, distances, np.array([0]), alpha=1.0)
+    assert components["variance"] == pytest.approx(0.0, abs=1e-12)
+    assert components["centring"] == pytest.approx(0.0, abs=1e-12)
+
+
+def test_repulsion_energy_is_one_when_every_document_coincides() -> None:
+    coords = np.zeros((5, 2))
+    distances = np.zeros((5, 5))
+    _, _, components = stress_energy(coords, distances, np.array([0]), alpha=1.0)
+    assert components["repulsion"] == pytest.approx(1.0)
+
+
+def test_anchor_scale_is_the_mean_anchor_distance_ratio() -> None:
+    distances = np.array(
+        [
+            [0.0, 0.5, 0.25],
+            [0.5, 0.0, 0.75],
+            [0.25, 0.75, 0.0],
+        ]
+    )
+    anchors = np.array([0, 1, 2])
+    targets = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    pair = np.triu(np.ones((3, 3), dtype=bool), k=1)
+    chart = pairwise_distances(targets, targets)[pair].mean()
+    semantic = distances[pair].mean()
+    assert anchor_scale(distances, anchors, targets) == pytest.approx(chart / semantic)
+
+
+def test_constrained_stress_pins_the_anchors_and_respects_the_chart() -> None:
+    rng = np.random.default_rng(23)
+    n = 12
+    points = rng.uniform(-0.8, 0.8, size=(n, 2))
+    distances = pairwise_distances(points, points) / 2.0
+    anchor_index = np.array([0, 4, 9], dtype=np.int64)
+    anchor_target = np.array([[0.92, 0.0], [-0.92, 0.0], [0.0, 0.0]])
+    coords, stress, correlation = constrained_stress(
+        distances,
+        points,
+        anchor_index,
+        anchor_target,
+        max_iterations=40,
+    )
+    assert np.allclose(coords[anchor_index], anchor_target)
+    assert coords.min() >= -1.0 - 1e-9
+    assert coords.max() <= 1.0 + 1e-9
+    assert stress >= 0.0
+    assert -1.0 <= correlation <= 1.0
+
+
+# --------------------------------------------------------------------------- #
+# Eqs. 19 + Section 5.2: GPR relative uncertainty
+# --------------------------------------------------------------------------- #
+@pytest.mark.filterwarnings("ignore::sklearn.exceptions.ConvergenceWarning")
+def test_gpr_relative_uncertainty_is_sigma_post_over_sigma_prior() -> None:
+    """Eq. 19 + Section 5.2, and no sqrt(n_targets) inflation.
+
+    A multi-output GP on the SVD scores shares one kernel, so every target has
+    the same posterior standard deviation. Summing the identical target columns
+    (the earlier behaviour) multiplied sigma_post by sqrt(10) and pushed the
+    "relative" uncertainty above one.
+    """
+    rng = np.random.default_rng(29)
+    n_documents, n_features = 14, 26
+    dense = np.abs(rng.normal(size=(n_documents, n_features)))
+    dense /= np.linalg.norm(dense, axis=1, keepdims=True)
+    coords = rng.uniform(-0.8, 0.8, size=(n_documents, 2))
+    grid = build_grid({"manifold": {"grid_size": 5, "bounds": [-1.0, 1.0]}})
+
+    fields = gpr_uncertainty(sp.csr_matrix(dense), grid, coords, n_components=3)
+
+    for name in ("u_rbf", "u_matern"):
+        assert fields[name].shape == (len(grid),)
+        assert np.all(fields[name] > 0.0)
+        # sigma_post <= sigma_prior, so a true relative uncertainty is <= 1.
+        assert float(fields[name].max()) <= 1.0 + 1e-9
+    assert np.allclose(
+        fields["u_rbf"], fields["sigma_post_rbf"] / fields["sigma_prior_rbf"]
+    )
+    assert np.allclose(
+        fields["u_matern"], fields["sigma_post_matern"] / fields["sigma_prior_matern"]
+    )
+    # Section 5.2: sigma_post <= sigma_prior pointwise, so the ratio is a
+    # genuine relative uncertainty and can never exceed one.
+    assert np.all(fields["sigma_post_rbf"] <= fields["sigma_prior_rbf"] + 1e-12)
+    assert np.all(fields["sigma_post_matern"] <= fields["sigma_prior_matern"] + 1e-12)
+    # Eq. 19: the fitted kernel is the anisotropic RBF plus a white-noise term.
+    assert "RBF" in fields["kernel_rbf"]
+    assert "WhiteKernel" in fields["kernel_rbf"]
+    assert "Matern" in fields["kernel_matern"]

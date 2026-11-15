@@ -320,6 +320,88 @@
     font-family: var(--mono); font-size: 15px; line-height: 1.2; color: var(--fg);
   }
 
+  /* ── external idea overlay ─────────────────────────────────────────── */
+  .sec-idea {
+    padding: 14px 16px !important;
+    background: linear-gradient(180deg, rgba(34, 211, 238, 0.07), rgba(34, 211, 238, 0) 78%);
+  }
+  .sec-idea.pulse { animation: idea-pulse 1.2s ease-out 1; }
+  @keyframes idea-pulse {
+    from { box-shadow: inset 0 0 0 1.5px rgba(34, 211, 238, 0.6); }
+    to { box-shadow: inset 0 0 0 1.5px rgba(34, 211, 238, 0); }
+  }
+  .idea-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .idea-title { font-size: 13.5px; font-weight: 600; line-height: 1.3; color: #e8eef7; }
+  .idea-sub { margin-top: 3px; font-family: var(--mono); font-size: 9px; color: var(--dim); }
+  .idea-obj {
+    display: grid; grid-template-columns: 6.4em 3.2em 3.6em minmax(0, 1fr);
+    align-items: center; gap: 8px; padding: 2.5px 0;
+  }
+  .idea-obj > .nm { font-family: var(--mono); font-size: 9.5px; color: var(--faint); }
+  .idea-obj > .vl { font-family: var(--mono); font-size: 10.5px; color: #e2e8f0; text-align: right; }
+  .idea-obj > .pc { font-family: var(--mono); font-size: 9px; color: var(--dim); text-align: right; }
+  .idea-bar { height: 4px; border-radius: 9999px; background: rgba(148, 163, 184, 0.14); overflow: hidden; }
+  .idea-bar > i { display: block; height: 100%; border-radius: 9999px; background: linear-gradient(90deg, #0e7490, #22d3ee); }
+  .idea-gap {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin-top: 10px; padding: 8px 9px; border-radius: 11px;
+    border: 1px solid rgba(244, 114, 182, 0.24); background: rgba(244, 114, 182, 0.06);
+    cursor: pointer; transition: border-color .16s ease, background-color .16s ease;
+  }
+  .idea-gap:hover { border-color: rgba(244, 114, 182, 0.5); background: rgba(244, 114, 182, 0.11); }
+  .idea-gap > .t { min-width: 0; }
+  .idea-gap > .t > b { display: block; font-family: var(--mono); font-size: 10.5px; color: #f9a8d4; }
+  .idea-gap > .t > span { display: block; margin-top: 2px; font-size: 9.5px; color: var(--dim); }
+  .idea-warn {
+    display: flex; flex-direction: column; gap: 4px; margin-top: 10px;
+    font-size: 9.5px; line-height: 1.45; color: #fcd34d;
+  }
+  .idea-warn > span { display: block; padding-left: 11px; position: relative; }
+  .idea-warn > span::before { content: "!"; position: absolute; left: 0; color: rgba(251, 191, 36, 0.75); }
+  /* The idea and a corpus gap are two different objects. When the idea is on
+     screen the gap panes are hidden, so no gap number can sit under the idea
+     card and read as its rank. */
+  #drawer-scroll.idea-mode .gap-pane { display: none; }
+  .idea-back {
+    margin-top: 12px; padding: 5px 9px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--line); background: rgba(255, 255, 255, 0.03);
+    font-family: var(--mono); font-size: 9.5px; color: var(--muted);
+  }
+  .idea-back:hover { background: var(--card-hi); color: #e2e8f0; }
+  /* The numbers are above; this block says them in sentences, each tied to the
+     value it explains. Thresholds live in src/explore.py, not in the browser. */
+  .idea-plain { margin-top: 10px; padding: 9px 10px; border-radius: 11px;
+    border: 1px solid rgba(34, 211, 238, 0.18); background: rgba(34, 211, 238, 0.05); }
+  .idea-plain > .lead { font-size: 10px; line-height: 1.5; color: #dbeafe; }
+  .idea-plain > .lead > b { color: #67e8f9; font-weight: 600; }
+  .idea-plain > p { margin-top: 6px; font-size: 9.5px; line-height: 1.55; color: var(--muted); }
+  .idea-plain > p > b { color: #cbd5e1; font-weight: 600; }
+  .idea-front {
+    display: flex; flex-direction: column; gap: 5px; margin-top: 10px; padding: 8px 9px;
+    border-radius: 11px; border: 1px solid rgba(148, 163, 184, 0.16);
+    background: rgba(148, 163, 184, 0.045);
+  }
+  .idea-front > .fr { display: flex; align-items: baseline; gap: 6px; font-size: 9.5px; line-height: 1.45; color: var(--muted); }
+  .idea-front > .fr > .k { flex: none; width: 8.6em; font-family: var(--mono); font-size: 8.5px; color: var(--faint); }
+  .idea-front > .fr > .v { min-width: 0; color: #cbd5e1; }
+  .idea-front > .fr.dom > .v { color: #fca5a5; }
+  .idea-front > .fr > .v b { font-family: var(--mono); font-weight: 600; color: #e2e8f0; }
+  /* W saturates between q60 and q85, so the row above can read 1.000 for a
+     quarter of the grid: the share is printed once, directly under the rows. */
+  .idea-note {
+    margin-top: 5px; font-family: var(--mono); font-size: 9px; line-height: 1.5;
+    color: var(--dim);
+  }
+  .idea-note b { font-weight: 600; color: #a5f3fc; }
+  .idea-nb + .idea-nb { margin-top: 10px; }
+  .idea-nb-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 5px; }
+  .idea-nb-head > .lbl { font-size: 10px; font-weight: 500; color: #cbd5e1; }
+  .idea-nb-head > .hint { font-size: 9px; color: var(--faint); }
+  .idea-glyph {
+    display: inline-block; height: 8px; width: 8px; border-radius: 1.5px;
+    border: 1.4px solid #ecfeff; background: #22d3ee; transform: rotate(45deg);
+  }
+
   /* ── scorecard ──────────────────────────────────────────────────────── */
   #radar {
     height: 178px; width: 100%; border-radius: 10px;
@@ -536,7 +618,7 @@
 
   <div id="metric-chips" class="metric-strip"></div>
 
-  <div class="app-hints">
+  <div id="app-hints" class="app-hints">
     <span class="hint-chip">
       <kbd>←</kbd><kbd>→</kbd> gap
       <span class="hint-sep">·</span>
@@ -568,6 +650,7 @@
         <span class="legend-item"><span class="diamond-glyph"></span>seeding paper</span>
         <span class="legend-item"><span class="star-glyph" style="color:#f9a8d4">★</span>practical gap</span>
         <span class="legend-item"><span class="star-glyph" style="color:#fbbf24">★</span>#1 compromise</span>
+        <span id="idea-legend"></span>
       </div>
     </div>
 
@@ -591,7 +674,34 @@
 
     <div id="drawer-scroll" class="drawer-body">
 
-      <section class="sec-gap">
+      <section id="sec-idea" class="sec-idea hidden" aria-labelledby="idea-title">
+        <div class="idea-head">
+          <div class="min-w-0">
+            <div class="gap-kicker">External document · never in the corpus</div>
+            <div class="idea-title" id="idea-title"></div>
+            <div class="idea-sub" id="idea-sub"></div>
+          </div>
+          <div class="gap-ideal">
+            <div class="gap-ideal-label">d_ideal</div>
+            <div class="gap-ideal-value" id="idea-dideal" title="Euclidean distance to the ideal corner (1, 1, 1, 1): lower is better"></div>
+          </div>
+        </div>
+        <div id="idea-stats" class="stats-grid"></div>
+        <div id="idea-plain" class="idea-plain"></div>
+        <div id="idea-objectives" style="margin-top:10px"></div>
+        <div id="idea-legend-objectives" class="idea-note"></div>
+        <div id="idea-note" class="idea-note"></div>
+        <div id="idea-front" class="idea-front"></div>
+        <div id="idea-nearest-gap"></div>
+        <div id="idea-neighbours" class="anchor-list" style="margin-top:10px"></div>
+        <div id="idea-terms" class="chip-list" style="margin-top:10px"></div>
+        <div id="idea-warnings" class="idea-warn"></div>
+        <button id="idea-back" class="idea-back" type="button">
+          back to the corpus gaps
+        </button>
+      </section>
+
+      <section class="sec-gap gap-pane">
         <div class="gap-head">
           <div class="min-w-0">
             <div class="gap-headline">
@@ -616,7 +726,7 @@
         </div>
       </section>
 
-      <section>
+      <section class="gap-pane">
         <div class="sec-head">
           <span class="sh"><i data-lucide="target"></i>Objective scorecard</span>
           <span class="sec-note">0–1 · higher is better</span>
@@ -626,7 +736,7 @@
         <div id="stats" class="stats-grid"></div>
       </section>
 
-      <section>
+      <section class="gap-pane">
         <div class="sec-head">
           <span class="sh"><i data-lucide="pie-chart"></i>Regime mixture</span>
           <span class="sec-note">global / adaptive</span>
@@ -634,7 +744,7 @@
         <div id="mixture"></div>
       </section>
 
-      <section>
+      <section class="gap-pane">
         <div class="sec-head">
           <span class="sh"><i data-lucide="layers"></i>Anchor papers</span>
           <span class="sec-note">top 5 · SPH weight</span>
@@ -642,7 +752,7 @@
         <div id="anchors" class="anchor-list"></div>
       </section>
 
-      <section>
+      <section class="gap-pane">
         <div class="sec-head">
           <span class="sh"><i data-lucide="type"></i>Lexical lenses</span>
           <span class="sec-note">local vocabulary</span>
@@ -676,7 +786,7 @@
         </div>
       </section>
 
-      <section>
+      <section class="gap-pane">
         <div class="prompt-head">
           <div>
             <div class="sh"><i data-lucide="sparkles"></i>Appendix A.1 prompt</div>
@@ -1020,6 +1130,23 @@ function buildManifold() {
     marker: { symbol: "star", size: 17, color: "#fbbf24", line: { width: 1.2, color: "#78350f" } }
   });
 
+  /* The external idea. Drawn last so it sits on top of every corpus layer, and
+     deliberately a different glyph shape: the page must never let a reader
+     mistake it for a corpus paper or a gap star. */
+  if (DATA.idea) {
+    const idea = DATA.idea;
+    index.ideaHalo = own("ideaHalo", {
+      type: "scatter", mode: "markers", x: [idea.x], y: [idea.y], hoverinfo: "skip",
+      showlegend: false, name: "idea halo",
+      marker: { symbol: "circle", size: 32, color: "#22d3ee", opacity: 0.09, line: { width: 0 } }
+    });
+    index.idea = own("idea", {
+      type: "scatter", mode: "markers", name: "Your idea",
+      x: [idea.x], y: [idea.y], text: [ideaHover(idea)], hoverinfo: "text",
+      marker: { symbol: "diamond", size: 13, color: "#22d3ee", line: { width: 1.6, color: "#ecfeff" } }
+    });
+  }
+
   /* Selection ring, repositioned with Plotly.restyle. */
   index.selection = own("selection", {
     type: "scatter", mode: "markers", x: [top.x], y: [top.y], hoverinfo: "skip",
@@ -1070,7 +1197,14 @@ function buildManifold() {
       font: { family: "JetBrains Mono, monospace", size: 9.5, color: "#fcd34d" },
       bgcolor: "rgba(11,15,25,0.85)", bordercolor: "rgba(251,191,36,0.35)",
       borderwidth: 1, borderpad: 3
-    }]
+    }].concat(DATA.idea ? [{
+      x: DATA.idea.x, y: DATA.idea.y, text: "your idea",
+      showarrow: true, arrowhead: 0, arrowwidth: 1, arrowcolor: "rgba(34,211,238,0.65)",
+      ax: DATA.idea.x > 0 ? -70 : 70, ay: 34,
+      font: { family: "JetBrains Mono, monospace", size: 9.5, color: "#67e8f9" },
+      bgcolor: "rgba(8,15,22,0.88)", bordercolor: "rgba(34,211,238,0.40)",
+      borderwidth: 1, borderpad: 3
+    }] : [])
   };
 
   const config = {
@@ -1086,6 +1220,7 @@ function buildManifold() {
       if (!point) return;
       if (point.data.name === "Supported Knowledge Gaps") selectGap(Number(point.pointNumber));
       else if (point.data.name === "#1 compromise") selectGap(0);
+      else if (point.data.name === "Your idea") focusIdea();
     });
     if (window.ResizeObserver) {
       new ResizeObserver(function () { Plotly.Plots.resize(node); }).observe(node.parentElement);
@@ -1094,6 +1229,287 @@ function buildManifold() {
 
   index.owners = owners;
   return index;
+}
+
+function ideaHover(idea) {
+  const o = {};
+  idea.objectives.forEach(function (entry) { o[entry.name] = entry.value; });
+  const top = idea.neighbours && idea.neighbours[0];
+  return "<b>" + esc(idea.label) + "</b> · not in the corpus<br>" +
+    "chart (" + signed(idea.x) + ", " + signed(idea.y) + ")<br>" +
+    '<span style="color:#67e8f9">P</span> ' + fmt(o.P_boundary || 0) +
+    ' <span style="color:#fcd34d">W</span> ' + fmt(o.W || 0) +
+    ' <span style="color:#6ee7b7">G</span> ' + fmt(o.G || 0) +
+    ' <span style="color:#d8b4fe">S</span> ' + fmt(o.S || 0) + "<br>" +
+    "d<sub>ideal</sub> " + fmt(idea.ideal_distance, 3) +
+    " · best gap " + fmt(idea.best_gap_ideal, 3) + "<br>" +
+    (top ? '<i style="color:#94a3b8">nearest</i><br>&nbsp;&nbsp;cos ' +
+      fmt(top.similarity, 3) + " · " + esc(top.title.slice(0, 62)) : "");
+}
+
+/* The overlay is one extra document, so its evidence gets one card at the top
+   of the drawer. Every number here is copied from src/explore.py's artifact;
+   nothing is recomputed in the browser. */
+function renderIdea() {
+  const idea = DATA.idea;
+  const legend = document.getElementById("idea-legend");
+  if (!idea) return;
+
+  const legendItem = el("span", {
+    class: "legend-item",
+    title: "External document placed on the finished map; it is never part of the corpus or the front. Click to open its card."
+  }, [el("span", { class: "idea-glyph" }), "your idea"]);
+  legendItem.style.cursor = "pointer";
+  legendItem.addEventListener("click", function () { focusIdea(); });
+  append(legend, legendItem);
+
+  const hints = document.getElementById("app-hints");
+  if (hints) {
+    append(hints, el("span", { class: "hint-chip" }, [
+      el("kbd", { text: "i" }), "idea"
+    ]));
+  }
+
+  document.getElementById("sec-idea").classList.remove("hidden");
+  document.getElementById("idea-title").textContent = idea.label;
+  document.getElementById("idea-sub").textContent =
+    idea.document + " · " + idea.word_count.toLocaleString() + " words · (" +
+    signed(idea.x) + ", " + signed(idea.y) + ")";
+  document.getElementById("idea-dideal").textContent = fmt(idea.ideal_distance, 3);
+
+  const nearest = idea.neighbours && idea.neighbours[0];
+  append(document.getElementById("idea-stats"), [
+    statCell("best gap", fmt(idea.best_gap_ideal, 3), "d_ideal of the #1 practical gap", "lower"),
+    statCell("place ±", fmt(idea.placement_error, 2), "leave-one-out median position error, chart units; spacing " + fmt(idea.typical_spacing, 2), "chart"),
+    statCell("vocab", Math.round(idea.vocabulary_match * 100) + "%", "share of the document's n-grams the corpus vocabulary contains", "match")
+  ]);
+
+  const objectives = document.getElementById("idea-objectives");
+  idea.objectives.forEach(function (entry) {
+    append(objectives, el("div", { class: "idea-obj" }, [
+      el("span", { class: "nm", text: entry.name }),
+      el("span", { class: "vl", text: fmt(entry.value, 3) }),
+      el("span", { class: "pc", text: Math.round(entry.percentile) + "th", title: "percentile among " + idea.candidates + " grid points" }),
+      el("span", { class: "idea-bar" }, [
+        el("i", { style: { width: Math.max(2, Math.round(entry.value * 100)) + "%" } })
+      ])
+    ]));
+  });
+
+  /* W (Eq. 12) is a band-pass that saturates between q60 and q85, so 1.000 is
+     the value a quarter of the grid scores. Without the share, a maximum reads
+     as a unique position when it only means "the nearest document is far
+     enough". The share is printed beside the value, not in a tooltip. */
+  const whiteRow = (idea.objectives || []).find(function (entry) {
+    return entry.name === "W";
+  });
+  if (whiteRow && idea.white_space_plateau_share > 0) {
+    append(document.getElementById("idea-note"), el("div", {}, [
+      el("b", { text: "W " + fmt(whiteRow.value, 3) }),
+      " · " + Math.round(idea.white_space_plateau_share * 100) + "% of the " +
+        idea.candidates + " grid points score the same (the band-pass saturates " +
+        "between q60 and q85). A plateau value means the nearest document is at " +
+        "a healthy distance; it does not make this position unique."
+    ]));
+  }
+
+  /* The idea has no gap number: the front is 55 discrete candidates ranked by
+     d_ideal, and this document is neither a candidate nor a front member. The
+     three surrogates below answer the three questions that number was standing
+     in for, and each row says what it does *not* mean. */
+  const front = idea.front || {};
+  const frontHost = document.getElementById("idea-front");
+  const frontRow = function (key, value, extraClass, gapRank) {
+    const valueNode = el("span", { class: "v" }, [value]);
+    const node = el("div", { class: "fr" + (extraClass ? " " + extraClass : "") }, [
+      el("span", { class: "k", text: key }),
+      valueNode
+    ]);
+    if (gapRank != null) {
+      const target = DATA.gaps.findIndex(function (g) { return g.rank === gapRank; });
+      if (target >= 0) {
+        node.style.cursor = "pointer";
+        node.title = "Open gap #" + gapRank + " in the drawer";
+        node.addEventListener("click", function () { selectGap(target); });
+      }
+    }
+    append(frontHost, node);
+  };
+  if (front.nearest_chart) {
+    frontRow(
+      "on the map",
+      "gap #" + front.nearest_chart.rank + " · " + fmt(front.nearest_chart.chart_distance, 3) +
+        " away · its d_ideal " + fmt(front.nearest_chart.ideal_distance, 3) +
+        " (projection neighbour, not a ranking)",
+      null,
+      front.nearest_chart.rank
+    );
+  }
+  if (front.nearest_objective) {
+    frontRow(
+      "in objectives",
+      "gap #" + front.nearest_objective.rank + " · Δ " +
+        fmt(front.nearest_objective.objective_distance, 3) + " in (P, W, G, S) · d_ideal " +
+        fmt(front.nearest_objective.ideal_distance, 3),
+      null,
+      front.nearest_objective.rank
+    );
+  }
+  if (front.insertion_rank) {
+    const before = front.insertion_before ? " #" + front.insertion_before.rank + " (" + fmt(front.insertion_before.ideal_distance, 3) + ")" : "";
+    const after = front.insertion_after ? " #" + front.insertion_after.rank + " (" + fmt(front.insertion_after.ideal_distance, 3) + ")" : "";
+    frontRow(
+      "if inserted",
+      "#" + front.insertion_rank + " of " + front.insertion_of + " by d_ideal, between" +
+        before + " and" + after + " — hypothetical, gaps are discrete",
+      null,
+      null
+    );
+  }
+  if (front.dominated_by) {
+    const dom = front.dominated_by;
+    frontRow(
+      "front",
+      "no — gap #" + dom.rank + " dominates it on all four objectives " +
+        "(P " + fmt((dom.objectives || {}).P_boundary, 3) +
+        " · W " + fmt((dom.objectives || {}).W, 3) +
+        " · G " + fmt((dom.objectives || {}).G, 3) +
+        " · S " + fmt((dom.objectives || {}).S, 3) + ")",
+      "dom",
+      dom.rank
+    );
+  } else if (front.on_front) {
+    frontRow("front", "no gap dominates it — it would join the front at this position", null, null);
+  }
+  if (front.dominated_by_count > 1) {
+    frontRow("dominators", front.dominated_by_count + " gaps score at least as high on all four", null, null);
+  }
+
+  /* One line per axis: what it measures, then what *this* value means. The
+     generic meaning alone leaves the reader guessing whether 0.442 is good;
+     the reading is selected from fixed thresholds in src/explore.py, so it can
+     be checked against the number printed above it. */
+  const readings = (idea.plain && idea.plain.readings) || [];
+  const valueOf = {};
+  (idea.objectives || []).forEach(function (entry) { valueOf[entry.name] = entry; });
+  readings.forEach(function (entry) {
+    const measured = valueOf[entry.name];
+    append(document.getElementById("idea-legend-objectives"), el("div", {}, [
+      el("b", { text: entry.name }),
+      measured ? " " + fmt(measured.value, 3) + " · " + Math.round(measured.percentile) + "th" : "",
+      " — " + entry.meaning + ". For this document: " + entry.reading + "."
+    ]));
+  });
+
+  /* The same numbers said in sentences. This is the block a reader can quote:
+     position, novelty evidence, and what front membership does and does not
+     mean, each derived from the artifact rather than written by hand. */
+  const plain = idea.plain || {};
+  const plainHost = document.getElementById("idea-plain");
+  if (plain.headline) {
+    append(plainHost, el("div", { class: "lead" }, [
+      el("b", { text: "In plain words: " }), plain.headline
+    ]));
+  }
+  [
+    ["position", plain.position],
+    ["novelty", plain.novelty],
+    ["the front", plain.front]
+  ].forEach(function (entry) {
+    if (!entry[1]) return;
+    append(plainHost, el("p", {}, [el("b", { text: entry[0] + ": " }), entry[1]]));
+  });
+
+  const corpusSize = idea.corpus_documents ? "/" + idea.corpus_documents : "";
+  const neighbours = document.getElementById("idea-neighbours");
+  /* Two orderings, because they disagree: the chart is a 2-D projection of a
+     high-dimensional text space (stress and distance correlation are in the
+     artifact), so the documents nearest in words and the documents nearest on
+     the map are frequently different papers. Neither list is "the"
+     neighbourhood, and showing only the chart order once hid the closest
+     paper entirely (text rank 1, chart rank 25). */
+  const listNeighbours = function (heading, hint, rows, describe) {
+    if (!rows.length) return;
+    const block = el("div", { class: "idea-nb" });
+    append(block, el("div", { class: "idea-nb-head" }, [
+      el("span", { class: "lbl", text: heading }),
+      el("span", { class: "hint", text: hint })
+    ]));
+    rows.forEach(function (neighbour, position) {
+      append(block, el("div", { class: "anchor no-link" }, [
+        el("div", { class: "anchor-row" }, [
+          el("span", { class: "idx", text: String(position + 1) }),
+          el("div", { class: "anchor-main" }, [
+            el("div", { class: "ttl", text: neighbour.title }),
+            el("div", { class: "meta", text: neighbour.regime + " · " + describe(neighbour) })
+          ])
+        ])
+      ]));
+    });
+    append(neighbours, block);
+  };
+
+  const union = idea.neighbours || [];
+  listNeighbours(
+    "nearest in text",
+    "what the document is about",
+    union.slice().sort(function (a, b) { return a.cosine_rank - b.cosine_rank; }).slice(0, 3),
+    function (n) {
+      return "cos " + fmt(n.similarity, 3) + " · text #" + (n.cosine_rank + 1) + corpusSize +
+        " · map #" + (n.chart_rank + 1) + " d " + fmt(n.chart_distance, 3);
+    }
+  );
+  listNeighbours(
+    "nearest on the map",
+    "where the projection puts it",
+    union.slice().sort(function (a, b) { return a.chart_rank - b.chart_rank; }).slice(0, 3),
+    function (n) {
+      return "d " + fmt(n.chart_distance, 3) + " · map #" + (n.chart_rank + 1) +
+        " · text #" + (n.cosine_rank + 1) + corpusSize + " cos " + fmt(n.similarity, 3);
+    }
+  );
+
+  const terms = document.getElementById("idea-terms");
+  (idea.novel_terms || []).slice(0, 10).forEach(function (term) {
+    append(terms, el("span", { class: "chip", title: "term the corpus covers in at most 3 documents" }, [
+      el("span", { text: term })
+    ]));
+  });
+
+  (idea.warnings || []).forEach(function (warning) {
+    append(document.getElementById("idea-warnings"), el("span", { text: warning }));
+  });
+}
+
+/* The idea is not a gap and has no rank, so the drawer must not look like a gap
+   card. Entering idea mode hides the corpus panes (otherwise the selected gap's
+   number sits directly under the idea card and reads as its rank) and enlarges
+   the diamond on the map so the click visibly lands somewhere. */
+function ideaMode(active) {
+  const scroll = document.getElementById("drawer-scroll");
+  if (scroll) scroll.classList.toggle("idea-mode", active);
+  if (!PLOT.idea) return;
+  Plotly.restyle("manifold", {
+    "marker.size": active ? 19 : 13,
+    "marker.line.width": active ? 2.6 : 1.6
+  }, [PLOT.idea]);
+  Plotly.restyle("manifold", {
+    "marker.size": active ? 58 : 32,
+    "marker.opacity": active ? 0.2 : 0.09
+  }, [PLOT.ideaHalo]);
+  const point = active ? DATA.idea : DATA.gaps[state.gapIndex];
+  Plotly.restyle("manifold", { x: [[point.x]], y: [[point.y]] }, [PLOT.selection]);
+}
+
+function focusIdea() {
+  const section = document.getElementById("sec-idea");
+  if (!section || section.classList.contains("hidden")) return;
+  ideaMode(true);
+  section.scrollIntoView({ block: "start", behavior: "smooth" });
+  section.classList.remove("pulse");
+  void section.offsetWidth;
+  section.classList.add("pulse");
+  setTimeout(function () { section.classList.remove("pulse"); }, 1400);
 }
 
 /* ────────────────────────── drawer ────────────────────────── */
@@ -1414,6 +1830,7 @@ function renderDrawer() {
 let PLOT = {};
 
 function selectGap(index, options) {
+  ideaMode(false);
   const total = DATA.gaps.length;
   state.gapIndex = ((index % total) + total) % total;
   const gap = DATA.gaps[state.gapIndex];
@@ -1544,6 +1961,8 @@ function boot() {
   document.getElementById("next-btn").addEventListener("click", function () { selectGap(state.gapIndex + 1); });
   document.getElementById("copy-btn").addEventListener("click", copyPrompt);
   document.getElementById("download-btn").addEventListener("click", downloadPrompt);
+  const backBtn = document.getElementById("idea-back");
+  if (backBtn) backBtn.addEventListener("click", function () { selectGap(state.gapIndex); });
 
   document.querySelectorAll("[data-layer]").forEach(function (button) {
     button.addEventListener("click", function () { setLayer(button.dataset.layer); });
@@ -1557,7 +1976,14 @@ function boot() {
       const layers = ["none"].concat(DATA.fields.map(function (f) { return f.name; }));
       setLayer(layers[Number(event.key) - 1]);
     }
+    if ((event.key === "i" || event.key === "I") && DATA.idea) {
+      focusIdea();
+      event.preventDefault();
+    }
+    if (event.key === "Escape" && DATA.idea) selectGap(state.gapIndex);
   });
+
+  renderIdea();
 
   PLOT = buildManifold();
 

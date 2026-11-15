@@ -323,6 +323,7 @@ def harvest_regime_papers(
     delay_seconds: float = 3.0,
     num_retries: int = 5,
     date_range: str = "",
+    blocked_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Harvest up to ``target_count`` papers for a single regime.
 
@@ -330,12 +331,18 @@ def harvest_regime_papers(
     regimes stay disjoint and no seeding paper is fetched twice; new IDs and
     titles are registered as records are accepted.  ``date_range`` is an optional
     arXiv ``submittedDate`` clause ANDed onto the regime query.
+
+    Ids in ``blocked_ids`` are rejected during the scan, not after it, so a
+    dead record is backfilled by the next candidate instead of leaving the
+    regime one paper short.
     """
     collected: list[dict[str, Any]] = []
     scanned = 0
     rejected_review = 0
     rejected_short = 0
     rejected_dupe = 0
+    rejected_blocked = 0
+    blocked = blocked_ids or set()
 
     base_query = str(regime_cfg["query"])
     query = f"({base_query}) AND {date_range}" if date_range else base_query
@@ -354,11 +361,21 @@ def harvest_regime_papers(
         scanned += 1
 
         short_id = result.get_short_id()
+        base_id = arxiv_base_id(short_id)
         raw_title = (result.title or "").strip().replace("\n", " ")
         raw_abstract = result.summary or ""
         title_key = normalize_title(raw_title)
 
-        if arxiv_base_id(short_id) in seen_ids or title_key in seen_titles:
+        if base_id in blocked:
+            rejected_blocked += 1
+            LOGGER.info(
+                "[%s] skipping %s (corpus.exclude_arxiv_ids)",
+                regime_cfg["label"],
+                short_id,
+            )
+            continue
+
+        if base_id in seen_ids or title_key in seen_titles:
             rejected_dupe += 1
             continue
 
@@ -397,7 +414,7 @@ def harvest_regime_papers(
         }
 
         collected.append(record)
-        seen_ids.add(arxiv_base_id(short_id))
+        seen_ids.add(base_id)
         seen_titles.add(title_key)
 
         LOGGER.info(
@@ -410,11 +427,13 @@ def harvest_regime_papers(
         )
 
     LOGGER.info(
-        "[%s] done: kept=%d scanned=%d dupes=%d reviews=%d short_abstracts=%d",
+        "[%s] done: kept=%d scanned=%d dupes=%d blocked=%d reviews=%d "
+        "short_abstracts=%d",
         regime_cfg["label"],
         len(collected),
         scanned,
         rejected_dupe,
+        rejected_blocked,
         rejected_review,
         rejected_short,
     )
@@ -469,6 +488,10 @@ def harvest_all(
     ``submittedDate`` clause.  ``seed_identifiers`` and ``seed_titles``
     pre-register seeding papers so a seed that is itself on arXiv is never
     fetched a second time, whether its filename yielded an id or not.
+
+    ``corpus.exclude_arxiv_ids`` names records that must never enter the
+    corpus — withdrawn or duplicated entries whose PDF no longer resolves. They
+    are rejected at selection time so the regime backfills the slot.
     """
     corpus_cfg = config.get("corpus", {})
     regimes: list[dict[str, Any]] = config.get("regimes", [])
@@ -484,6 +507,17 @@ def harvest_all(
     min_abstract_words = _config_int(corpus_cfg, "min_abstract_words", 40)
     delay_seconds = _config_float(corpus_cfg, "delay_seconds", 3.0)
     num_retries = _config_int(corpus_cfg, "num_retries", 5)
+    blocked_ids: set[str] = {
+        arxiv_base_id(str(item))
+        for item in (corpus_cfg.get("exclude_arxiv_ids") or [])
+        if str(item).strip()
+    }
+    if blocked_ids:
+        LOGGER.info(
+            "Hard-excluding %d arXiv id(s) from corpus.exclude_arxiv_ids: %s",
+            len(blocked_ids),
+            ", ".join(sorted(blocked_ids)),
+        )
 
     window = date_clause(start_year) if start_year is not None else ""
     if window:
@@ -524,6 +558,7 @@ def harvest_all(
                 delay_seconds=delay_seconds,
                 num_retries=num_retries,
                 date_range=window,
+                blocked_ids=blocked_ids,
             )
         )
 
@@ -541,6 +576,7 @@ def harvest_all(
             "date_clause": window or None,
             "review_exclusion_keywords": exclude_keywords,
             "review_exclusion_abstract_patterns": abstract_patterns,
+            "exclude_arxiv_ids": sorted(blocked_ids),
             "queries": {str(r["label"]): r["query"] for r in regimes},
             "protocol_reference": (
                 "Obayashi et al. (2026) Knowledge Manifold Optimization, Sec. 5.1"
@@ -1903,10 +1939,12 @@ def parse_seed_metadata(front_matter: str) -> tuple[str, list[str]]:
     if not paragraphs:
         return "", []
 
-    title = " ".join(
-        line.strip()
-        for line in paragraphs[0].splitlines()
-        if line.strip() and not _is_boilerplate_line(line.strip())
+    title = _join_title_lines(
+        [
+            line.strip()
+            for line in paragraphs[0].splitlines()
+            if line.strip() and not _is_boilerplate_line(line.strip())
+        ]
     ).strip(" .,;:")
     words = title.split()
     # A real title is short, free of e-mail addresses, and carries words.  A
@@ -1918,7 +1956,7 @@ def parse_seed_metadata(front_matter: str) -> tuple[str, list[str]]:
     for paragraph in paragraphs[1:]:
         lines = [line.strip() for line in paragraph.splitlines() if line.strip()]
         # Two author templates are in use: one name per line, and
-        # "NAME, Affiliation, Country" on every line.  When any line splits
+        # "NAME, Affiliation, Country" on every line.  When every line splits
         # cleanly into nothing but names, trust those lines only -- that is the
         # strict reading and it keeps institution names out of the list.
         strict = [
@@ -1927,24 +1965,55 @@ def parse_seed_metadata(front_matter: str) -> tuple[str, list[str]]:
             if line.split()
             and all(
                 _clean_author_name(candidate)
-                for candidate in re.split(r",|\band\b|&|\s{2,}", line)
-                if candidate.strip()
+                for candidate in _split_author_candidates(line)
             )
         ]
-        found: list[str] = []
-        for line in strict or lines:
-            for candidate in re.split(r",|\band\b|&|\s{2,}", line):
-                name = _clean_author_name(candidate)
-                if name and name not in authors:
-                    found.append(name)
+        found = _collect_author_names(strict) if strict else []
+        if not found:
+            # A paragraph of names the PDF layer glued together
+            # (``DonovanClay``) still yields nothing above, so retry that one
+            # paragraph with the camel-hump split enabled.  Restricted to the
+            # paragraph that failed, because the split would also read an
+            # organisation name such as ``DeepMind`` as a person.
+            found = _collect_author_names(lines, unglue=True)
         if not found:
             # The first paragraph with no names is the affiliation block; stop
             # there so body prose can never be mistaken for an author list.
             break
-        authors.extend(found)
+        authors.extend(name for name in found if name not in authors)
         if len(authors) > 40:
             break
     return title, authors[:40]
+
+
+def _collect_author_names(lines: list[str], unglue: bool = False) -> list[str]:
+    """Names found in one author paragraph, in printed order, without dupes."""
+    names: list[str] = []
+    for line in lines:
+        for candidate in _split_author_candidates(line):
+            name = _clean_author_name(candidate, unglue=unglue)
+            if name and name not in names:
+                names.append(name)
+    return names
+
+
+def _join_title_lines(lines: list[str]) -> str:
+    """Join a wrapped title, repairing hyphens the PDF broke across lines.
+
+    ``ACTIVE EXPLORATION FOR SYSTEM IDENTIFI-`` / ``CATION`` is one word, not
+    two: left alone it renders as a hyphenated nonsense label on the map and
+    misses an exact-title arXiv lookup.  Only a *trailing* hyphen is repaired,
+    so real hyphenation inside a line (``Vision-Language-Action``) survives.
+    """
+    joined = ""
+    for line in lines:
+        if joined and joined.endswith("-"):
+            joined = joined[:-1] + line
+        elif joined:
+            joined = f"{joined} {line}"
+        else:
+            joined = line
+    return " ".join(joined.split())
 
 
 #: Publisher / venue furniture that precedes a title, never part of it.
@@ -1967,6 +2036,33 @@ _AUTHOR_NAME_RE = re.compile(
     r"^[A-Z][A-Za-z'\u2019-]*(?:\s+[A-Z][A-Za-z'\u2019.-]*){1,3}$"
 )
 
+#: Markup that sits *between* author names in a title block: superscript
+#: affiliation digits, footnote marks, and contribution glyphs (``♥`` for core
+#: contributors, ``✉`` for corresponding author).  Replacing these with a
+#: separator is what lets ``Puyue Wang∗ 1 Jiawei Hu∗ 2`` yield two names instead
+#: of one long token that matches no name pattern at all.
+_AUTHOR_MARKUP_RE = re.compile(r"[\d\*\u2217\u2020\u2021\u00a7\u00b6\u2665\u2709"
+                               r"\u2218\u22c4\u25c6\u25c7\u2606\u2605]+")
+
+#: Two camel humps glued by a bad PDF text layer: ``DonovanClay`` -- first name
+#: and surname printed side by side in a multi-column author grid.  Only
+#: applied in the loose pass, because a greedy split also turns single-word
+#: organisation names (``DeepMind``) into name-shaped tokens.
+_CAMEL_AUTHOR_RE = re.compile(r"^[A-Z][a-z]+[A-Z][a-zA-Z'\u2019-]+$")
+
+
+def _split_author_candidates(text: str) -> list[str]:
+    """Split one line of an author block into candidate name tokens.
+
+    Handles both author templates in use -- comma-separated lists and
+    one-name-per-line grids -- plus markup glyphs between names.  Markup becomes
+    a separator rather than being deleted, so adjacent names keep their
+    boundary (``A∗ 1 B∗ 2`` would otherwise collapse into ``A B``).
+    """
+    marked = _AUTHOR_MARKUP_RE.sub("|", text)
+    parts = re.split(r"[,;|]|\band\b|&|\s{2,}", marked)
+    return [part.strip() for part in parts if part.strip()]
+
 
 def _is_boilerplate_line(line: str) -> bool:
     """True for venue/arXiv/page furniture that precedes a title."""
@@ -1978,7 +2074,7 @@ def _is_boilerplate_line(line: str) -> bool:
 
 def _looks_like_author_line(line: str) -> bool:
     """True when a line reads as a comma-separated list of personal names."""
-    candidates = [part for part in re.split(r",|\band\b", line) if part.strip()]
+    candidates = _split_author_candidates(line)
     named = [part for part in candidates if _clean_author_name(part)]
     return len(named) >= 2 and len(named) >= len(candidates) - 1
 
@@ -1995,6 +2091,7 @@ def _looks_like_affiliation_line(line: str) -> bool:
 _INSTITUTION_TOKENS = frozenset(
     {
         "eth",
+        "hugging",
         "nvidia",
         "mila",
         "meta",
@@ -2024,10 +2121,18 @@ _INSTITUTION_TOKENS = frozenset(
 )
 
 
-def _clean_author_name(raw: str) -> str:
-    """Strip footnote markers from a candidate author token, or return ''."""
-    token = re.sub(r"[\d\*∗†‡§¶,;]", " ", raw)
+def _clean_author_name(raw: str, unglue: bool = False) -> str:
+    """Strip footnote markers from a candidate author token, or return ''.
+
+    ``unglue`` additionally splits a single camel-humped token into
+    given-name/surname, which recovers author grids whose columns the PDF text
+    layer merged into one word (``DonovanClay``).  It is opt-in because the same
+    rule would read an organisation name like ``DeepMind`` as a person.
+    """
+    token = re.sub(r"[\d\*∗†‡§¶♥✉,;]", " ", raw)
     token = " ".join(token.split()).strip(" .")
+    if unglue and token and " " not in token and _CAMEL_AUTHOR_RE.match(token):
+        token = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", token)
     if not token or _AFFILIATION_RE.search(token):
         return ""
     if {word.lower() for word in token.split()} & _INSTITUTION_TOKENS:

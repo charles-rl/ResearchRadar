@@ -55,6 +55,8 @@ class Paths:
     dashboard_template: Path
     prompt_payload: Path
     prompt_template: Path
+    explorer_json: Path
+    idea_report: Path
 
 
 #: Repository root, used to find source assets (templates, the Appendix A.1
@@ -221,6 +223,7 @@ def resolve_paths(config: dict[str, Any], config_path: Path) -> Paths:
     manifold_cfg = config.get("manifold", {})
     pareto_cfg = config.get("pareto", {})
     output_cfg = config.get("output", {})
+    explorer_cfg = config.get("explorer", {})
 
     return Paths(
         config_dir=config_dir,
@@ -248,6 +251,10 @@ def resolve_paths(config: dict[str, Any], config_path: Path) -> Paths:
         / str(output_cfg.get("prompt_path", "output/KMO_PROMPT_TOP1.txt")),
         prompt_template=config_dir
         / str(output_cfg.get("prompt_template", "docs/kmo_prompt_template_A1.txt")),
+        explorer_json=config_dir
+        / str(explorer_cfg.get("output_path", "data/explorer_idea.json")),
+        idea_report=config_dir
+        / str(explorer_cfg.get("report_path", "output/IDEA_PLACEMENT.md")),
     )
 
 
