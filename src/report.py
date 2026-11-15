@@ -51,6 +51,8 @@ from .common import (
     resolve_paths,
 )
 from .embed import Representation, load_representation
+from .manifold import normalized_mixture
+from .regimes import cluster_catalog
 
 DEFAULT_CONFIG = Path("config.yaml")
 PROMPT_TEMPLATE = Path("docs/kmo_prompt_template_A1.txt")
@@ -527,29 +529,89 @@ def build_evidence_package(
     vocabulary: Vocabulary,
     papers: list[dict[str, Any]],
     regime_labels: list[str],
+    catalog: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Assemble the machine-computed evidence package for one Pareto location."""
     index = int(point["grid_index"])
     weights = np.asarray(grid_data["weights_global"][index], dtype=np.float64)
+    weights_adaptive = np.asarray(
+        grid_data["weights_adaptive"][index], dtype=np.float64
+    )
     lenses = local_lenses(weights, vocabulary, papers)
 
-    # Three boundary views exist (K=5 global, K=8 global, K=8 adaptive). Report
-    # the Discovery-level (K=5) mixture as the headline and keep the K=8 views
-    # alongside it, because cluster labels are not comparable across K and only
-    # the scalar boundary measures can be cross-checked (Sec. 3.2).
+    # Two different mixtures live here and conflating them is the easy mistake:
+    #
+    # * ``regime_mixture`` - the share of the *named corpus regions* (the ones
+    #   that colour the map), Eq. 6 applied to ``doc_regime``.  This is a
+    #   corpus-taxonomy summary; the paper has no equivalent because its regimes
+    #   are discovered, but every renderer needs it to describe the map colours.
+    # * ``cluster_mixture`` - Eq. 6 applied to the K=5 and K=8 partitions the
+    #   boundary objective is actually computed from.  Sec. 3.2 keeps the two
+    #   resolutions apart: cluster ``c`` at K=5 is unrelated to cluster ``c`` at
+    #   K=8, so the vectors are never compared index by index.
+    #
+    # An earlier version fed ``mixture_k5_global`` (a 5-vector) into a table whose
+    # rows were the named regions (a 3-vector taxonomy), so it showed the first
+    # three K=5 clusters under region names and silently dropped clusters 3 and 4
+    # (and 3-7 of K=8).  Both mixtures are now computed from their own partition.
+    doc_regime = np.asarray(grid_data["doc_regime"], dtype=np.int64)
+    n_regimes = int(doc_regime.max()) + 1
+    if len(regime_labels) != n_regimes:
+        raise SystemExit(
+            f"Corpus has {len(regime_labels)} regime labels but the grid stores "
+            f"{n_regimes}; re-run `python -m src.manifold`"
+        )
+    regime_global = normalized_mixture(weights[None, :], doc_regime, n_regimes)[0]
+    regime_adaptive = normalized_mixture(
+        weights_adaptive[None, :], doc_regime, n_regimes
+    )[0]
     mixture = {
         label: {
-            "k5_global": round(
-                float(np.asarray(grid_data["mixture_k5_global"])[index][position]), 4
-            ),
-            "k8_global": round(
-                float(np.asarray(grid_data["mixture_k8_global"])[index][position]), 4
-            ),
-            "k8_adaptive": round(
-                float(np.asarray(grid_data["mixture_k8_adaptive"])[index][position]), 4
-            ),
+            "global": round(float(regime_global[position]), 4),
+            "adaptive": round(float(regime_adaptive[position]), 4),
         }
         for position, label in enumerate(regime_labels)
+    }
+
+    if catalog is None:
+        catalog = cluster_catalog(
+            papers,
+            {
+                5: np.asarray(grid_data["labels_k5"], dtype=np.int64),
+                8: np.asarray(grid_data["labels_k8"], dtype=np.int64),
+            },
+        )
+    k5 = np.asarray(grid_data["mixture_k5_global"])[index]
+    k8_global = np.asarray(grid_data["mixture_k8_global"])[index]
+    k8_adaptive = np.asarray(grid_data["mixture_k8_adaptive"])[index]
+    cluster_mixture = {
+        "k5": {
+            "k": 5,
+            "view": "Discovery level (B_5,g)",
+            "items": [
+                {
+                    "id": entry["id"],
+                    "label": entry["label"],
+                    "size": entry["size"],
+                    "global": round(float(k5[entry["id"]]), 4),
+                }
+                for entry in catalog.get("k5", [])
+            ],
+        },
+        "k8": {
+            "k": 8,
+            "view": "Reference level (B_8,g / B_8,a)",
+            "items": [
+                {
+                    "id": entry["id"],
+                    "label": entry["label"],
+                    "size": entry["size"],
+                    "global": round(float(k8_global[entry["id"]]), 4),
+                    "adaptive": round(float(k8_adaptive[entry["id"]]), 4),
+                }
+                for entry in catalog.get("k8", [])
+            ],
+        },
     }
 
     n_eff = float(np.asarray(grid_data["n_eff"])[index])
@@ -573,6 +635,7 @@ def build_evidence_package(
         "contributing_documents_top5": contributing_documents(weights, papers, limit=5),
         "mixture_entropy_H": round(entropy, 4),
         "regime_mixture": mixture,
+        "cluster_mixture": cluster_mixture,
         "effective_contributing_documents": round(n_eff, 2),
         "relative_uncertainty_u": round(uncertainty, 6),
         "relative_uncertainty_u_rbf": round(uncertainty, 6),
@@ -911,6 +974,61 @@ def _format_term_list(entries: list[dict[str, Any]], limit: int = 12) -> str:
     return ", ".join(parts)
 
 
+def mixture_tables(package: dict[str, Any]) -> list[str]:
+    """Markdown for the three Eq. 6 mixtures of one evidence package.
+
+    They are three different objects and the report used to conflate them: the
+    named corpus regions (which colour the map), and the K=5 / K=8 partitions the
+    boundary objective is actually computed from.  Sec. 3.2 keeps the resolutions
+    apart - cluster ``c`` at K=5 is unrelated to cluster ``c`` at K=8 - so each
+    gets its own table instead of a shared column block.
+    """
+    lines = [
+        (
+            "Eq. 6 regime mixture over the **named corpus regions** (the map "
+            "colours), global and adaptive weights:"
+        ),
+        "",
+        _markdown_table(
+            ["Corpus region", "global", "adaptive"],
+            [
+                [label, f"{data['global']:.3f}", f"{data['adaptive']:.3f}"]
+                for label, data in package["regime_mixture"].items()
+            ],
+        ),
+        "",
+        (
+            "Eq. 6 cluster mixture at the two resolutions the boundary objective is "
+            "computed from (Sec. 3.2). Cluster `c` at K=5 is unrelated to cluster "
+            "`c` at K=8, so the two blocks are never read across:"
+        ),
+        "",
+    ]
+    for key, title in (("k5", "K=5 Discovery level"), ("k8", "K=8 Reference level")):
+        block = package["cluster_mixture"][key]
+        # Only the K=8 views exist in both weightings; an "adaptive" column of
+        # em-dashes for K=5 reads as missing data rather than as a view the paper
+        # never defines.
+        has_adaptive = any("adaptive" in item for item in block["items"])
+        lines.extend([f"##### {title}", ""])
+        lines.append(
+            _markdown_table(
+                ["Cluster", "Documents", "global"] + (["adaptive"] if has_adaptive else []),
+                [
+                    [
+                        f"K{block['k']}·{item['id'] + 1} {_escape(item['label'])}",
+                        str(item["size"]),
+                        f"{item['global']:.3f}",
+                    ]
+                    + ([f"{item['adaptive']:.3f}"] if has_adaptive else [])
+                    for item in block["items"]
+                ],
+            )
+        )
+        lines.append("")
+    return lines
+
+
 def render_markdown(
     corpus: dict[str, Any],
     grid_data: dict[str, Any],
@@ -1162,25 +1280,7 @@ def render_markdown(
             + f"; distance to ideal `{representative['ideal_distance']:.4f}`."
         )
         lines.append("")
-        lines.append(
-            _markdown_table(
-                [
-                    "Regime",
-                    "K=5 global",
-                    "K=8 global",
-                    "K=8 adaptive",
-                ],
-                [
-                    [
-                        label,
-                        f"{data['k5_global']:.3f}",
-                        f"{data['k8_global']:.3f}",
-                        f"{data['k8_adaptive']:.3f}",
-                    ]
-                    for label, data in package["regime_mixture"].items()
-                ],
-            )
-        )
+        lines.extend(mixture_tables(package))
         lines.append("")
         lines.append(
             f"Mixture entropy `H = {package['mixture_entropy_H']:.3f}`; effective "
@@ -1657,6 +1757,17 @@ def build_gap_packages(
             "TF-IDF row order does not match the corpus; re-run `python -m src.embed`"
         )
     vocabulary = build_vocabulary(representation)
+    # Naming the K=5/K=8 partitions is the same work for every gap, so it is done
+    # once here instead of once per package: `cluster_terms` re-derives a c-TF-IDF
+    # over all 120 titles/abstracts each call, and 28 gaps x 2 resolutions turned
+    # a 0.2 s step into a multi-second one.
+    catalog = cluster_catalog(
+        papers,
+        {
+            5: np.asarray(grid_data["labels_k5"], dtype=np.int64),
+            8: np.asarray(grid_data["labels_k8"], dtype=np.int64),
+        },
+    )
     # Archetype labels, N_eff, and top-3 anchors are derived per solution and are
     # needed by every consumer (the report's front table and the dashboard's
     # scorecard), so they are attached here rather than by a caller.
@@ -1671,7 +1782,7 @@ def build_gap_packages(
     packages: dict[int, dict[str, Any]] = {}
     for solution in wanted:
         package = build_evidence_package(
-            solution, grid_data, vocabulary, papers, regime_labels
+            solution, grid_data, vocabulary, papers, regime_labels, catalog
         )
         packages[int(solution["grid_index"])] = package
     LOGGER.info("Evidence packages: %d gaps", len(packages))

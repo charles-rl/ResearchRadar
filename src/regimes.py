@@ -587,6 +587,54 @@ def label_partition(
     return tuple(labelled), mapping
 
 
+def cluster_catalog(
+    papers: list[dict[str, Any]],
+    partitions: dict[int, NDArray[np.int64]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Name whichever partitions are passed in, indexed the way the mixture is.
+
+    Eq. 6's mixture vector ``p_K(x)`` is indexed by the **raw** cluster label of
+    the partition it was computed from, and the stored partition
+    (``manifold_grid.npz::labels_k5``/``labels_k8``) is that partition.  Naming
+    renumbers clusters by size for display, so the two orders differ and a
+    caller that zips labels to ``p_K`` positionally would mislabel every row.
+    The returned list is therefore ordered by raw label and carries both ids:
+    ``id`` is the mixture index, ``order`` the display rank.
+
+    Only names are computed here; the partitions themselves are *not* rebuilt.
+    They come from ``src.manifold.cluster_labels``, which partitions the TF-IDF
+    representation, and this function never re-clusters, so the labels always
+    describe the partition the boundary objective was actually computed from.
+    """
+    catalog: dict[str, list[dict[str, Any]]] = {}
+    for k in sorted(partitions):
+        labels = np.asarray(partitions[k], dtype=np.int64)
+        if labels.size == 0:
+            continue
+        if int(labels.max()) + 1 != k:
+            raise SystemExit(
+                f"K={k} partition has labels 0..{int(labels.max())}; "
+                "the mixture vector expects exactly K clusters"
+            )
+        labelled, mapping = label_partition(papers, labels, k)
+        by_position = {entry.cluster: entry for entry in labelled}
+        entries: list[dict[str, Any]] = []
+        for raw in range(k):
+            entry = by_position[mapping[raw]]
+            entries.append(
+                {
+                    "id": raw,
+                    "order": int(entry.cluster),
+                    "label": str(entry.label),
+                    "terms": list(entry.terms),
+                    "size": int(entry.size),
+                    "summary": str(entry.summary),
+                }
+            )
+        catalog[f"k{k}"] = entries
+    return catalog
+
+
 def discover_regimes(
     coords: NDArray[np.float64],
     papers: list[dict[str, Any]],

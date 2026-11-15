@@ -45,7 +45,11 @@
       var(--bg);
   }
   h1, p, pre, table, select { margin: 0; }
-  .hidden { display: none; }
+  /* ``!important`` because this has to beat the panel's own layout rules:
+     ``.drawer-body > section { display: block }`` is more specific than a bare
+     ``.hidden``, which silently kept the idea card visible after it had been
+     toggled off.  A utility class that can be out-specified is a bug factory. */
+  .hidden { display: none !important; }
   button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
   a { color: inherit; }
 
@@ -202,8 +206,26 @@
   /* ``display: contents`` promotes the regime chips into the legend's own flex
      row.  As an inline span they stacked one per line once the labels became
      phrases instead of single words, which cost five rows of map height. */
-  #regime-legend { display: contents; }
+  #regime-legend, #cluster-legend { display: contents; }
   .legend-sep { width: 1px; height: 12px; background: rgba(255, 255, 255, 0.10); }
+  .legend-caption {
+    font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--dim);
+  }
+  /* The cluster key is a key for the mixture table, not for the dots: the K=5/K=8
+     partitions are computed in TF-IDF space and interleave on the 2-D chart, so
+     colouring the markers by them would be confetti.  A square swatch plus the
+     ``K5·n`` code keeps it from reading as a region hue. */
+  .cluster-chip {
+    display: inline-flex; align-items: center; gap: 4px; padding: 1px 5px;
+    border-radius: 5px; border: 1px solid rgba(148, 163, 184, 0.14);
+    background: rgba(255, 255, 255, 0.02);
+    font-family: var(--mono); font-size: 8.5px; color: var(--muted); cursor: help;
+  }
+  .cluster-chip:hover { border-color: var(--line-hi); color: #e2e8f0; }
+  .cluster-chip > i {
+    width: 6px; height: 6px; border-radius: 1.5px; flex: none; display: block;
+  }
   .diamond-glyph {
     width: 8px;
     height: 8px;
@@ -216,6 +238,10 @@
 
   .map-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
   #manifold { position: absolute; inset: 0; }
+  /* Plotly's drag mode is ``pan``: the wheel zooms (``scrollZoom``), a drag pans,
+     and a double click resets.  The cursor says so before the first drag. */
+  #manifold .nsewdrag { cursor: grab; }
+  #manifold .nsewdrag:active { cursor: grabbing; }
   .map-badge {
     position: absolute; right: 12px; top: 12px; pointer-events: none;
     padding: 4px 8px; border-radius: 7px; border: 1px solid var(--line);
@@ -243,6 +269,24 @@
     padding: 8px 10px; border-bottom: 1px solid var(--line);
     background: rgba(10, 15, 24, 0.7);
   }
+  /* ``i idea``: the external document is an overlay, not a second inspector.  It
+     is off by default so the drawer always opens on the selected gap, and this
+     button (or the ``i`` key) is the only way in. */
+  .toggle-btn {
+    display: inline-flex; align-items: center; gap: 5px; flex: none;
+    height: 28px; padding: 0 8px; border-radius: 8px;
+    border: 1px solid var(--line); background: rgba(255, 255, 255, 0.02);
+    color: var(--muted); font-size: 10.5px; font-weight: 500;
+    transition: color .16s ease, border-color .16s ease, background-color .16s ease;
+  }
+  .toggle-btn:hover { color: #fff; border-color: var(--line-hi); background: rgba(255, 255, 255, 0.06); }
+  .toggle-btn > kbd { pointer-events: none; }
+  .toggle-btn > svg { height: 12px; width: 12px; }
+  .toggle-btn[aria-pressed="true"] {
+    color: #a5f3fc; border-color: rgba(34, 211, 238, 0.45);
+    background: rgba(34, 211, 238, 0.13);
+  }
+  .toggle-btn[aria-pressed="true"] > svg { color: #67e8f9; }
   .drawer-body { flex: 1 1 auto; min-height: 0; scrollbar-gutter: stable; }
   @media (min-width: 1024px) { .drawer-body { overflow-y: auto; } }
 
@@ -358,10 +402,18 @@
   }
   .idea-warn > span { display: block; padding-left: 11px; position: relative; }
   .idea-warn > span::before { content: "!"; position: absolute; left: 0; color: rgba(251, 191, 36, 0.75); }
-  /* The idea and a corpus gap are two different objects. When the idea is on
-     screen the gap panes are hidden, so no gap number can sit under the idea
-     card and read as its rank. */
-  #drawer-scroll.idea-mode .gap-pane { display: none; }
+  /* The idea and a corpus gap are two different objects.  In overlay mode the
+     idea card sits above the gap card and is separated by a cyan rule; the gap
+     panes stay visible, because the whole point of the toggle is to compare the
+     dashed ``[P, W, G, S]`` outline against the selected gap's scorecard. */
+  #drawer-scroll.idea-mode #sec-idea {
+    border-top: 2px solid rgba(34, 211, 238, 0.22);
+  }
+  .idea-overlay-note {
+    display: flex; align-items: baseline; gap: 5px; margin-top: 8px;
+    font-size: 9px; line-height: 1.5; color: var(--dim);
+  }
+  .idea-overlay-note > b { color: #67e8f9; font-weight: 600; }
   .idea-back {
     margin-top: 12px; padding: 5px 9px; border-radius: 8px; cursor: pointer;
     border: 1px solid var(--line); background: rgba(255, 255, 255, 0.03);
@@ -414,6 +466,16 @@
   .radar-caption > span { white-space: nowrap; }
   .radar-caption b { font-weight: 600; color: #94a3b8; }
   .radar-caption b.v { color: #e2e8f0; margin-left: 4px; }
+  /* Key for the two polygons.  A dashed cyan line and a solid archetype-coloured
+     line are not self-explanatory, and the idea has no other on-chart label. */
+  .radar-key {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 12px;
+    margin-top: 5px; font-family: var(--mono); font-size: 8.5px; color: var(--dim);
+  }
+  .radar-key > span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .radar-key .swatch { width: 14px; height: 0; border-top-width: 1.6px; border-top-style: solid; }
+  .radar-key .swatch.dashed { border-top-style: dashed; }
+  .radar-key .swatch.dotted { border-top-style: dotted; }
   .stats-grid {
     display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px; margin-top: 8px;
@@ -440,11 +502,15 @@
   }
   .mix-bar > i { display: block; height: 100%; }
   .mix-list { margin-top: 6px; }
+  /* One, two or three columns, declared per block instead of fixed at three:
+     the named regions and the K=8 view need global + adaptive, the K=5 view has
+     no adaptive field at all. The default is two numeric columns. */
   .mix-row, .mix-head {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 3.4em 3.4em 3.4em;
+    grid-template-columns: minmax(0, 1fr) 3.4em 3.4em;
     align-items: center; gap: 8px; padding: 2px 0;
   }
+  .mix-list.c1 .mix-row, .mix-list.c1 .mix-head { grid-template-columns: minmax(0, 1fr) 3.4em; }
   .mix-head {
     margin-top: 4px; padding-bottom: 1px;
     font-family: var(--mono); font-size: 9px; color: var(--dim);
@@ -452,13 +518,22 @@
     border-bottom: 1px solid var(--line);
   }
   .mix-head > :first-child { text-align: left; }
-  .mix-row > .nm { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #cbd5e1; }
+  .mix-row > .nm { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #cbd5e1; min-width: 0; }
+  .mix-row > .nm > .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mix-row > .nm > .code { font-family: var(--mono); font-size: 8.5px; color: var(--dim); flex: none; }
   .mix-row > .vl { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
   .mix-row > .ad {
     font-family: var(--mono); font-size: 9.5px; color: var(--dim);
     min-width: 3.6em; text-align: right;
   }
+  .mix-block + .mix-block { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .mix-cap {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+    margin-bottom: 5px; font-size: 9.5px; font-weight: 500; color: #cbd5e1;
+  }
+  .mix-cap > .hint { font-size: 8.5px; font-weight: 400; color: var(--faint); }
   .chip-dot { width: 7px; height: 7px; border-radius: 9999px; display: inline-block; flex: none; }
+  .chip-sq { width: 7px; height: 7px; border-radius: 1.5px; display: inline-block; flex: none; }
 
   /* ── anchor papers ──────────────────────────────────────────────────── */
   .anchor-list { display: flex; flex-direction: column; gap: 6px; }
@@ -622,7 +697,7 @@
     <span class="hint-chip">
       <kbd>←</kbd><kbd>→</kbd> gap
       <span class="hint-sep">·</span>
-      <kbd>1</kbd>–<kbd>5</kbd> layer
+      <kbd>1</kbd>–<kbd>6</kbd> layer
     </span>
   </div>
 </header>
@@ -640,7 +715,12 @@
         <button data-layer="W" aria-pressed="false" class="is-mono" title="Band-pass white-space novelty">W</button>
         <button data-layer="G" aria-pressed="false" class="is-mono" title="Semantic gradient norm">G</button>
         <button data-layer="S" aria-pressed="false" class="is-mono" title="Evidential support">S</button>
+        <button data-layer="R" aria-pressed="false" class="is-mono" title="Model-based reliability: 1 - normalized GPR uncertainty (Sec. 3.7). A diagnostic layer, not a fifth Pareto objective.">R</button>
       </div>
+
+      <button id="reset-view" class="icon-btn" type="button" title="Reset zoom and pan (or double-click the map)" aria-label="Reset map view">
+        <i data-lucide="maximize"></i>
+      </button>
 
       <div id="layer-note"></div>
 
@@ -651,12 +731,14 @@
         <span class="legend-item"><span class="star-glyph" style="color:#f9a8d4">★</span>practical gap</span>
         <span class="legend-item"><span class="star-glyph" style="color:#fbbf24">★</span>#1 compromise</span>
         <span id="idea-legend"></span>
+        <span class="legend-sep"></span>
+        <span id="cluster-legend"></span>
       </div>
     </div>
 
     <div class="map-stage">
       <div id="manifold"></div>
-      <div class="map-badge">Ω = [−1, 1]² · 21×21 · 120 docs</div>
+      <div class="map-badge" id="map-badge"></div>
     </div>
   </section>
 
@@ -670,36 +752,13 @@
         <i data-lucide="chevron-right"></i>
       </button>
       <select id="gap-select" class="gap-select" aria-label="Select a Pareto gap"></select>
+      <button id="idea-btn" class="toggle-btn" type="button" aria-pressed="false"
+              title="Overlay your idea's objectives on the scorecard (i)">
+        <kbd>i</kbd><i data-lucide="diamond"></i><span>idea</span>
+      </button>
     </div>
 
     <div id="drawer-scroll" class="drawer-body">
-
-      <section id="sec-idea" class="sec-idea hidden" aria-labelledby="idea-title">
-        <div class="idea-head">
-          <div class="min-w-0">
-            <div class="gap-kicker">External document · never in the corpus</div>
-            <div class="idea-title" id="idea-title"></div>
-            <div class="idea-sub" id="idea-sub"></div>
-          </div>
-          <div class="gap-ideal">
-            <div class="gap-ideal-label">d_ideal</div>
-            <div class="gap-ideal-value" id="idea-dideal" title="Euclidean distance to the ideal corner (1, 1, 1, 1): lower is better"></div>
-          </div>
-        </div>
-        <div id="idea-stats" class="stats-grid"></div>
-        <div id="idea-plain" class="idea-plain"></div>
-        <div id="idea-objectives" style="margin-top:10px"></div>
-        <div id="idea-legend-objectives" class="idea-note"></div>
-        <div id="idea-note" class="idea-note"></div>
-        <div id="idea-front" class="idea-front"></div>
-        <div id="idea-nearest-gap"></div>
-        <div id="idea-neighbours" class="anchor-list" style="margin-top:10px"></div>
-        <div id="idea-terms" class="chip-list" style="margin-top:10px"></div>
-        <div id="idea-warnings" class="idea-warn"></div>
-        <button id="idea-back" class="idea-back" type="button">
-          back to the corpus gaps
-        </button>
-      </section>
 
       <section class="sec-gap gap-pane">
         <div class="gap-head">
@@ -710,7 +769,8 @@
                 <div class="gap-kicker">Supported gap</div>
                 <div class="gap-badges">
                   <span id="gap-arch" class="badge"></span>
-                  <span id="gap-boundary-badge" class="badge warn hidden">outer edge</span>
+                  <span id="gap-boundary-badge" class="badge warn hidden"
+                        title="The solution sits on the chart's outer edge: |x| = 1 or |y| = 1. Sec. 4.5 keeps boundary solutions in the front but reads them cautiously.">outer edge</span>
                 </div>
               </div>
             </div>
@@ -733,13 +793,44 @@
         </div>
         <div id="radar"></div>
         <div id="radar-caption" class="radar-caption" aria-label="Objective values"></div>
+        <div id="radar-idea-caption" class="radar-caption hidden" aria-label="Your idea's objective values"></div>
+        <div id="radar-key" class="radar-key"></div>
         <div id="stats" class="stats-grid"></div>
       </section>
+
+      <section id="sec-idea" class="sec-idea hidden" aria-labelledby="idea-title">
+        <div class="idea-head">
+          <div class="min-w-0">
+            <div class="gap-kicker">External document · never in the corpus</div>
+            <div class="idea-title" id="idea-title"></div>
+            <div class="idea-sub" id="idea-sub"></div>
+          </div>
+          <div class="gap-ideal">
+            <div class="gap-ideal-label">d_ideal</div>
+            <div class="gap-ideal-value" id="idea-dideal" title="Euclidean distance to the ideal corner (1, 1, 1, 1): lower is better"></div>
+          </div>
+        </div>
+        <div id="idea-stats" class="stats-grid"></div>
+        <div id="idea-plain" class="idea-plain"></div>
+        <div id="idea-objectives" style="margin-top:10px"></div>
+        <div id="idea-legend-objectives" class="idea-note"></div>
+        <div id="idea-note" class="idea-note"></div>
+        <div id="idea-front" class="idea-front"></div>
+        <div id="idea-overlay-note" class="idea-overlay-note"></div>
+        <div id="idea-nearest-gap"></div>
+        <div id="idea-neighbours" class="anchor-list" style="margin-top:10px"></div>
+        <div id="idea-terms" class="chip-list" style="margin-top:10px"></div>
+        <div id="idea-warnings" class="idea-warn"></div>
+        <button id="idea-back" class="idea-back" type="button">
+          hide this overlay (i)
+        </button>
+      </section>
+
 
       <section class="gap-pane">
         <div class="sec-head">
           <span class="sh"><i data-lucide="pie-chart"></i>Regime mixture</span>
-          <span class="sec-note">global / adaptive</span>
+          <span class="sec-note">Eq. 6 · global / adaptive</span>
         </div>
         <div id="mixture"></div>
       </section>
@@ -837,6 +928,18 @@ const DATA = readPayload();
 const REGIME_COLOR = {};
 DATA.regimes.forEach(function (regime) { REGIME_COLOR[regime.label] = regime.color; });
 
+/* Cluster colour and name by raw mixture index.  The K=5/K=8 partitions are
+   computed in TF-IDF space and interleave badly on the 2-D chart (silhouette
+   0.11 at K=5, -0.08 at K=8), so their colours are a key for the mixture table
+   only -- the map markers stay coloured by the named corpus region. */
+const CLUSTER = {};
+["k5", "k8"].forEach(function (key) {
+  const block = (DATA.clusters || {})[key];
+  if (!block) return;
+  CLUSTER[key] = { k: block.k, level: block.level, byId: {} };
+  block.items.forEach(function (item) { CLUSTER[key].byId[item.id] = item; });
+});
+
 /* The regime legend is built from the payload, never from the markup: the
    taxonomy lives in config.yaml, so chips baked into this template would go
    stale the moment a regime is renamed, added or dropped. */
@@ -880,10 +983,21 @@ const FIELD_META = {
   P_boundary: { label: "Persistent boundary", hint: "harmonic mean of global and adaptive boundary strength" },
   W: { label: "White-space novelty", hint: "band-pass quantile filter on nearest-neighbour distance" },
   G: { label: "Semantic gradient", hint: "Frobenius norm of the semantic-field Jacobian" },
-  S: { label: "Evidential support", hint: "inverse-Simpson N_eff, d5, and top-3 concentration" }
+  S: { label: "Evidential support", hint: "inverse-Simpson N_eff, d5, and top-3 concentration" },
+  /* R is the Sec. 3.7 model diagnostic, not a Pareto objective: it rides the
+     same heatmap plumbing but never enters the front (Sec. 4.3). */
+  R: { label: "Model-based reliability", hint: "1 - normalized GPR uncertainty (Eq. 19-20), a diagnostic, not an objective" }
 };
 
-const state = { gapIndex: 0, layer: "none", radarReady: false };
+/* The view the map opens in. ``pan`` + ``scrollZoom`` is the combination the
+   toolbar advertises: wheel zooms, drag pans, double-click resets. */
+const BASE_RANGE = [-1.09, 1.09];
+
+/* Ink for the idea's radar outline: near-white, so it stays legible over every
+   archetype fill (A is cyan, B amber, C violet). */
+const IDEA_INK = "#f1f5f9";
+
+const state = { gapIndex: 0, layer: "none", idea: false, radarReady: false };
 
 /* ────────────────────────── DOM helpers ──────────────────────────
  * Everything is built as real nodes. Note text is assigned via textContent and
@@ -1166,30 +1280,44 @@ function buildManifold() {
       align: "left"
     },
     xaxis: {
-      range: [-1.09, 1.09], zeroline: true, zerolinecolor: "rgba(148,163,184,0.20)",
+      range: BASE_RANGE.slice(), zeroline: true, zerolinecolor: "rgba(148,163,184,0.20)",
       gridcolor: "rgba(148,163,184,0.07)", showline: false,
       tickfont: { family: "JetBrains Mono, monospace", size: 9, color: "#475569" },
       dtick: 0.5, constrain: "domain"
     },
     yaxis: {
-      range: [-1.09, 1.09], zeroline: true, zerolinecolor: "rgba(148,163,184,0.20)",
+      range: BASE_RANGE.slice(), zeroline: true, zerolinecolor: "rgba(148,163,184,0.20)",
       gridcolor: "rgba(148,163,184,0.07)", showline: false,
       tickfont: { family: "JetBrains Mono, monospace", size: 9, color: "#475569" },
       dtick: 0.5, scaleanchor: "x", scaleratio: 1
     },
+    /* Drag pans (the wheel zooms, ``config.scrollZoom``).  ``pan`` and ``zoom``
+       cannot both be the drag gesture, and the question the page keeps asking is
+       "what is next to this?", which is a pan.  A double click still resets. */
+    dragmode: "pan",
     /* The toolbar carries a static legend instead: Plotly's own legend cannot
        align its swatches with text well enough at this size, and the two star
        glyphs need explaining in words. */
     showlegend: false,
     /* Frame the true problem domain. Because the axes must stay 1:1, a wide pane
        letterboxes the square plot; the Ω outline turns that leftover space into
-       deliberate margin instead of appearing as an empty canvas. */
-    shapes: [{
-      type: "rect", xref: "x", yref: "y",
-      x0: -1, y0: -1, x1: 1, y1: 1,
-      line: { color: "rgba(148,163,184,0.20)", width: 1 },
-      fillcolor: "rgba(148,163,184,0.022)", layer: "below"
-    }],
+       deliberate margin instead of appearing as an empty canvas.  Two shapes:
+       the faint fill sits *below* the traces, the border *above* them, because a
+       field heatmap at full strength covered the frame entirely. */
+    shapes: [
+      {
+        type: "rect", xref: "x", yref: "y",
+        x0: -1, y0: -1, x1: 1, y1: 1,
+        line: { width: 0 },
+        fillcolor: "rgba(148,163,184,0.022)", layer: "below"
+      },
+      {
+        type: "rect", xref: "x", yref: "y",
+        x0: -1, y0: -1, x1: 1, y1: 1,
+        line: { color: "rgba(148,163,184,0.34)", width: 1 },
+        fillcolor: "rgba(0,0,0,0)", layer: "above"
+      }
+    ],
     annotations: [{
       x: top.x, y: top.y, text: "#1 compromise",
       showarrow: true, arrowhead: 0, arrowwidth: 1, arrowcolor: "rgba(251,191,36,0.65)",
@@ -1209,6 +1337,7 @@ function buildManifold() {
 
   const config = {
     responsive: true, displaylogo: false, scrollZoom: true,
+    doubleClick: "reset",
     modeBarButtonsToRemove: ["select2d", "lasso2d", "autoScale2d", "toggleSpikelines"],
     toImageButtonOptions: { filename: "researchradar_manifold", scale: 2 }
   };
@@ -1221,6 +1350,18 @@ function buildManifold() {
       if (point.data.name === "Supported Knowledge Gaps") selectGap(Number(point.pointNumber));
       else if (point.data.name === "#1 compromise") selectGap(0);
       else if (point.data.name === "Your idea") focusIdea();
+    });
+    /* Plotly's own reset paths (the modebar house and the double click) ask for
+       ``autorange``, which frames the data rather than the [-1, 1]^2 domain and
+       so disagrees with the toolbar's reset. One canonical view: both are
+       rerouted to the explicit frame.  The guard cannot loop, because the
+       relayout it issues sets ranges instead of autorange. */
+    node.on("plotly_relayout", function (event) {
+      if (!event || (event["xaxis.autorange"] !== true && event["yaxis.autorange"] !== true)) return;
+      Plotly.relayout("manifold", {
+        "xaxis.range": BASE_RANGE.slice(),
+        "yaxis.range": BASE_RANGE.slice()
+      });
     });
     if (window.ResizeObserver) {
       new ResizeObserver(function () { Plotly.Plots.resize(node); }).observe(node.parentElement);
@@ -1257,20 +1398,19 @@ function renderIdea() {
 
   const legendItem = el("span", {
     class: "legend-item",
-    title: "External document placed on the finished map; it is never part of the corpus or the front. Click to open its card."
+    title: "External document placed on the finished map; it is never part of the corpus or the front. Click to overlay its objectives on the scorecard."
   }, [el("span", { class: "idea-glyph" }), "your idea"]);
   legendItem.style.cursor = "pointer";
   legendItem.addEventListener("click", function () { focusIdea(); });
   append(legend, legendItem);
 
-  const hints = document.getElementById("app-hints");
-  if (hints) {
-    append(hints, el("span", { class: "hint-chip" }, [
-      el("kbd", { text: "i" }), "idea"
-    ]));
-  }
-
-  document.getElementById("sec-idea").classList.remove("hidden");
+  /* The card is the idea's home, but it must not own the top of the drawer: it
+     opens hidden and only the ``i idea`` toggle (or the marker) reveals it. */
+  document.getElementById("sec-idea").classList.add("hidden");
+  append(document.getElementById("idea-overlay-note"), [
+    el("b", { text: "Overlay." }),
+    "The scorecard above stays on the selected gap; the dashed outline is this document."
+  ]);
   document.getElementById("idea-title").textContent = idea.label;
   document.getElementById("idea-sub").textContent =
     idea.document + " · " + idea.word_count.toLocaleString() + " words · (" +
@@ -1485,31 +1625,65 @@ function renderIdea() {
    card. Entering idea mode hides the corpus panes (otherwise the selected gap's
    number sits directly under the idea card and reads as its rank) and enlarges
    the diamond on the map so the click visibly lands somewhere. */
-function ideaMode(active) {
+/* The overlay is a state, not a mode: the drawer always keeps the selected gap
+   as its subject, and the idea is a dashed extra polygon on the scorecard plus
+   its evidence card above the gap card.  ``chrome`` updates everything except
+   the radar, which is redrawn by ``renderRadar`` from the same flag. */
+function applyIdeaChrome() {
+  const on = Boolean(DATA.idea) && state.idea;
   const scroll = document.getElementById("drawer-scroll");
-  if (scroll) scroll.classList.toggle("idea-mode", active);
+  if (scroll) scroll.classList.toggle("idea-mode", on);
+  const section = document.getElementById("sec-idea");
+  if (section) section.classList.toggle("hidden", !on);
+  const button = document.getElementById("idea-btn");
+  if (button) {
+    button.setAttribute("aria-pressed", String(on));
+    button.title = on
+      ? "Hide your idea's overlay (i)"
+      : "Overlay your idea's objectives on the scorecard (i)";
+  }
   if (!PLOT.idea) return;
   Plotly.restyle("manifold", {
-    "marker.size": active ? 19 : 13,
-    "marker.line.width": active ? 2.6 : 1.6
+    "marker.size": on ? 19 : 13,
+    "marker.line.width": on ? 2.6 : 1.6
   }, [PLOT.idea]);
   Plotly.restyle("manifold", {
-    "marker.size": active ? 58 : 32,
-    "marker.opacity": active ? 0.2 : 0.09
+    "marker.size": on ? 58 : 32,
+    "marker.opacity": on ? 0.2 : 0.09
   }, [PLOT.ideaHalo]);
-  const point = active ? DATA.idea : DATA.gaps[state.gapIndex];
-  Plotly.restyle("manifold", { x: [[point.x]], y: [[point.y]] }, [PLOT.selection]);
 }
 
-function focusIdea() {
+function setIdea(active) {
+  if (!DATA.idea) return;
+  const next = Boolean(active);
+  if (next === state.idea) return;
+  state.idea = next;
+  applyIdeaChrome();
+  renderRadar(DATA.gaps[state.gapIndex]);
   const section = document.getElementById("sec-idea");
-  if (!section || section.classList.contains("hidden")) return;
-  ideaMode(true);
-  section.scrollIntoView({ block: "start", behavior: "smooth" });
-  section.classList.remove("pulse");
-  void section.offsetWidth;
-  section.classList.add("pulse");
-  setTimeout(function () { section.classList.remove("pulse"); }, 1400);
+  if (next && section) {
+    /* Scroll to the scorecard, not to the card: the card sits directly under it
+       and the whole point of the toggle is seeing the two polygons together. */
+    const radar = document.getElementById("radar");
+    const target = radar || section;
+    if (typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
+    section.classList.remove("pulse");
+    void section.offsetWidth;
+    section.classList.add("pulse");
+    setTimeout(function () { section.classList.remove("pulse"); }, 1400);
+  }
+  icons();
+}
+
+function toggleIdea() {
+  setIdea(!state.idea);
+}
+
+/* The map marker and the legend chip are another way to press the toggle. */
+function focusIdea() {
+  toggleIdea();
 }
 
 /* ────────────────────────── drawer ────────────────────────── */
@@ -1524,7 +1698,7 @@ function statCell(label, value, hint, unit) {
   ]);
 }
 
-function renderRadarCaption(values) {
+function renderRadarCaption(values, ideaValues) {
   const host = document.getElementById("radar-caption");
   if (!host) return;
   const names = ["boundary", "novelty", "gradient", "support"];
@@ -1537,6 +1711,34 @@ function renderRadarCaption(values) {
       el("b", { class: "v", text: fmt(values[i], 2) })
     ]));
   });
+  /* The dashed polygon's numbers cannot ride on its vertices (the vertices of
+     the two polygons would overlap), so the idea gets its own caption row. */
+  if (ideaValues) {
+    const row = document.getElementById("radar-idea-caption");
+    if (!row) return;
+    clear(row);
+    append(row, el("span", {}, [
+      el("b", { text: "idea" }),
+      el("span", { text: " P" + fmt(ideaValues[0], 2) + "  W" + fmt(ideaValues[1], 2) +
+        "  G" + fmt(ideaValues[2], 2) + "  S" + fmt(ideaValues[3], 2) })
+    ]));
+  }
+}
+
+function swatch(color, style, label) {
+  return el("span", {}, [
+    el("span", { class: "swatch" + (style ? " " + style : ""), style: { borderTopColor: color } }),
+    label
+  ]);
+}
+
+function renderRadarKey(gap, color, showIdea) {
+  const host = document.getElementById("radar-key");
+  if (!host) return;
+  clear(host);
+  append(host, swatch(color, null, "gap #" + gap.rank));
+  if (showIdea) append(host, swatch(IDEA_INK, "dashed", "your idea"));
+  append(host, swatch("rgba(148,163,184,0.55)", "dotted", "ideal r = 1"));
 }
 
 function renderRadar(gap) {
@@ -1563,7 +1765,18 @@ function renderRadar(gap) {
 
   /* The numbers live in the caption row, not on the vertices: text at the
      right-hand vertex landed on top of the "P" theta label and read as "0P98". */
-  renderRadarCaption(values);
+  const idea = DATA.idea;
+  const showIdea = Boolean(idea) && state.idea;
+  const ideaValues = showIdea
+    ? ["P_boundary", "W", "G", "S"].map(function (name) {
+        const row = (idea.objectives || []).find(function (entry) { return entry.name === name; });
+        return row ? Number(row.value) : 0;
+      })
+    : null;
+  renderRadarCaption(values, ideaValues);
+  const ideaCaption = document.getElementById("radar-idea-caption");
+  if (ideaCaption) ideaCaption.classList.toggle("hidden", !showIdea);
+  renderRadarKey(gap, color, showIdea);
 
   /* Dashed reference ring at r = 1: the ideal corner this gap is ranked against. */
   const ideal = {
@@ -1575,6 +1788,26 @@ function renderRadar(gap) {
     hoverinfo: "skip",
     showlegend: false
   };
+
+  /* The external document's own `[P, W, G, S]` polygon, drawn as a dashed
+     outline so it can be read against any selected gap without either shape
+     filling over the other.  The ink is near-white, not the idea's cyan marker
+     colour, because Archetype A's polygon is cyan too and the two are usually
+     compared against each other. */
+  const ideaOutline = ideaValues ? {
+    type: "scatterpolar",
+    mode: "lines+markers",
+    name: "Your idea",
+    r: ideaValues.concat([ideaValues[0]]),
+    theta: labels.concat([labels[0]]),
+    fill: "none",
+    line: { color: IDEA_INK, width: 2, dash: "dash" },
+    marker: { size: 4, symbol: "diamond", color: "#ffffff" },
+    hoverinfo: "skip",
+    showlegend: false
+  } : null;
+
+  const traces = ideaOutline ? [trace, ideaOutline, ideal] : [trace, ideal];
 
   const layout = {
     paper_bgcolor: "rgba(0,0,0,0)",
@@ -1597,9 +1830,9 @@ function renderRadar(gap) {
   };
 
   if (state.radarReady) {
-    Plotly.react("radar", [trace, ideal], layout, { displayModeBar: false });
+    Plotly.react("radar", traces, layout, { displayModeBar: false });
   } else {
-    Plotly.newPlot("radar", [trace, ideal], layout, { displayModeBar: false, responsive: true });
+    Plotly.newPlot("radar", traces, layout, { displayModeBar: false, responsive: true });
     state.radarReady = true;
   }
 }
@@ -1617,53 +1850,111 @@ function renderStats(gap) {
   ].forEach(function (cell) { append(host, cell); });
 }
 
+/* The mixture panel answers three different questions and used to answer none of
+   them correctly: it showed a 5-vector of K=5 cluster shares under the three
+   named-region labels, with columns headed by weight scheme.  It now reports
+   (1) the named regions that colour the map, (2) every K=5 cluster, (3) every
+   K=8 cluster, each against its own partition. */
+function mixtureBlock(title, hint, rows, columns) {
+  const block = el("div", { class: "mix-block" });
+  append(block, el("div", { class: "mix-cap" }, [
+    el("span", { text: title }),
+    el("span", { class: "hint", text: hint || "" })
+  ]));
+  if (rows.bar) append(block, rows.bar);
+  append(block, el("div", { class: "mix-head" }, [el("span", { text: "" })].concat(
+    columns.map(function (column) { return el("span", { text: column.label, title: column.title }); })
+  )));
+  append(block, el("div", { class: "mix-list c" + columns.length }, rows.items));
+  return block;
+}
+
+function mixtureRow(color, glyph, name, code, hint, cells) {
+  return el("div", { class: "mix-row", title: hint || "" }, [
+    el("span", { class: "nm" }, [
+      el("span", { class: glyph, style: { background: color } }),
+      code ? el("span", { class: "code", text: code }) : null,
+      el("span", { class: "t", text: name })
+    ])
+  ].concat(cells.map(function (cell, position) {
+    return el("span", { class: position === cells.length - 1 && cells.length > 1 ? "ad" : "vl", text: fmt(cell, 3) });
+  })));
+}
+
 function renderMixture(gap) {
-  /* Three mixtures are reported, per Eq. 6: the K=5 Discovery-level global
-     field, the K=8 Reference-level global field, and the K=8 adaptive-bandwidth
-     field.  The stacked bar shows the K=5 view because that is the level the
-     discovery objectives are defined at; the table shows all three so the
-     adaptive field's redistribution is visible rather than hidden. */
-  const rows = DATA.regimes.map(function (regime) {
-    const entry = gap.mixture[regime.label] || {};
+  const host = document.getElementById("mixture");
+  clear(host);
+
+  /* 1. Named corpus regions.  These are the map's dot colours, so the stacked
+        bar is a colour key as much as a share; the numbers are Eq. 6 over
+        ``doc_regime``. */
+  const regions = DATA.regimes.map(function (regime) {
+    const entry = (gap.mixture || {})[regime.label] || {};
     return {
       label: regime.label,
       color: regime.color,
-      k5: Number(entry.k5_global || 0),
-      k8: Number(entry.k8_global || 0),
-      ad: Number(entry.k8_adaptive || 0)
+      global: Number(entry.global || 0),
+      adaptive: Number(entry.adaptive || 0)
     };
   });
-  const total = rows.reduce(function (sum, r) { return sum + r.k5; }, 0) || 1;
-
-  const bar = el("div", { class: "mix-bar" }, rows.map(function (r) {
+  const total = regions.reduce(function (sum, r) { return sum + r.global; }, 0) || 1;
+  const bar = el("div", { class: "mix-bar" }, regions.map(function (r) {
     return el("i", {
-      style: { width: (100 * r.k5 / total).toFixed(2) + "%", background: r.color },
-      title: r.label + " " + fmt(r.k5, 3) + " (K=5 global)"
+      style: { width: (100 * r.global / total).toFixed(2) + "%", background: r.color },
+      title: r.label + " " + fmt(r.global, 3) + " (global)"
     });
   }));
+  append(host, mixtureBlock(
+    "corpus regions",
+    "the map's colours",
+    {
+      bar: bar,
+      items: regions.map(function (r) {
+        return mixtureRow(r.color, "chip-dot", r.label, null, r.label + " shares the map's dot colour", [r.global, r.adaptive]);
+      })
+    },
+    [
+      { label: "global", title: "global smoothed weights (Eq. 9)" },
+      { label: "adaptive", title: "adaptive-bandwidth weights (Eq. 10)" }
+    ]
+  ));
 
-  const head = el("div", { class: "mix-head" }, [
-    el("span", { text: "" }),
-    el("span", { text: "K=5 g", title: "K=5 Discovery-level global field" }),
-    el("span", { text: "K=8 g", title: "K=8 Reference-level global field" }),
-    el("span", { text: "K=8 a", title: "K=8 adaptive-bandwidth field" })
-  ]);
-
-  const list = el("div", { class: "mix-list" }, rows.map(function (r) {
-    return el("div", { class: "mix-row" }, [
-      el("span", { class: "nm" }, [
-        el("span", { class: "chip-dot", style: { background: r.color } }),
-        el("span", { text: r.label })
-      ]),
-      el("span", { class: "vl", text: fmt(r.k5, 3) }),
-      el("span", { class: "vl", text: fmt(r.k8, 3) }),
-      el("span", { class: "ad", text: fmt(r.ad, 3) })
-    ]);
-  }));
-
-  const host = document.getElementById("mixture");
-  clear(host);
-  append(host, [bar, head, list]);
+  /* 2 + 3. The K=5 and K=8 partitions the boundary objective is built from
+        (Sec. 3.2).  Every cluster is listed: the panel used to stop at the
+        first three because the vector was zipped against the three regions. */
+  ["k5", "k8"].forEach(function (key) {
+    const block = CLUSTER[key];
+    const vector = (gap.cluster_mixture || {})[key];
+    if (!block || !vector) return;
+    const items = block.byId;
+    const rows = Object.keys(items).map(Number).sort(function (a, b) { return a - b; }).map(function (id) {
+      const item = items[id];
+      const global = Number((vector.global || [])[id] || 0);
+      const adaptive = vector.adaptive ? Number(vector.adaptive[id] || 0) : null;
+      const cells = adaptive === null ? [global] : [global, adaptive];
+      return mixtureRow(
+        item.color,
+        "chip-sq",
+        item.label,
+        "K" + block.k + "\u00b7" + (id + 1),
+        item.label + " \u00b7 " + item.size + " papers \u00b7 " +
+          (item.terms || []).join(", ") +
+          " \u00b7 mixture key only: map dots are coloured by named region",
+        cells
+      );
+    });
+    append(host, mixtureBlock(
+      "K=" + block.k + " " + String(block.level || "").toLowerCase() + " clusters",
+      block.k + " clusters \u00b7 TF-IDF partition",
+      { items: rows },
+      block.k === 5
+        ? [{ label: "global", title: "K=5 global field (B_5,g)" }]
+        : [
+            { label: "global", title: "K=8 global field (B_8,g)" },
+            { label: "adaptive", title: "K=8 adaptive-bandwidth field (B_8,a)" }
+          ]
+    ));
+  });
 }
 
 function renderAnchors(gap) {
@@ -1830,15 +2121,71 @@ function renderDrawer() {
 let PLOT = {};
 
 function selectGap(index, options) {
-  ideaMode(false);
   const total = DATA.gaps.length;
   state.gapIndex = ((index % total) + total) % total;
   const gap = DATA.gaps[state.gapIndex];
+  /* Selecting a gap is a switch, not a merge: the idea overlay turns off so the
+     inspector and its top card describe the gap that was just chosen.  Pressing
+     ``i`` is the way back in, and it then compares against this gap. */
+  if (state.idea) {
+    state.idea = false;
+  }
+  applyIdeaChrome();
   renderDrawer();
   Plotly.restyle("manifold", { x: [[gap.x]], y: [[gap.y]] }, [PLOT.selection]);
+  const scroll = document.getElementById("drawer-scroll");
+  if (scroll) scroll.scrollTop = 0;
   if (!options || options.updateHash !== false) {
     history.replaceState(null, "", "#gap=" + gap.rank);
   }
+}
+
+/* Back to the framed [-1, 1]^2 view.  Plotly has no clamp on pan/zoom, so the
+   only reliable escape from a lost view is an explicit reset; a double click on
+   the plot does the same via ``config.doubleClick``. */
+function resetView() {
+  Plotly.relayout("manifold", {
+    "xaxis.range": BASE_RANGE.slice(),
+    "yaxis.range": BASE_RANGE.slice()
+  });
+}
+
+/* Cluster key for the mixture table.  The codes match the ``K5·n`` / ``K8·n``
+   prefixes in the REGIME MIXTURE panel, and the tooltip carries the full name:
+   eight phrases do not fit in a toolbar. */
+function renderClusterLegend() {
+  const host = document.getElementById("cluster-legend");
+  if (!host) return;
+  clear(host);
+  ["k5", "k8"].forEach(function (key) {
+    const block = CLUSTER[key];
+    if (!block) return;
+    append(host, el("span", { class: "legend-caption", text: "mixture " + key.toUpperCase() }));
+    Object.keys(block.byId).map(Number).sort(function (a, b) { return a - b; }).forEach(function (id) {
+      const item = block.byId[id];
+      append(host, el("span", {
+        class: "cluster-chip",
+        title: "K=" + block.k + "\u00b7" + (id + 1) + " " + item.label +
+          " \u00b7 " + item.size + " papers \u00b7 " + (item.terms || []).join(", ") +
+          " \u2014 a mixture key, not a marker colour (map dots are coloured by named region)"
+      }, [
+        el("i", { style: { background: item.color } }),
+        el("span", { text: "K" + block.k + "\u00b7" + (id + 1) })
+      ]));
+    });
+  });
+}
+
+/* The badge states the domain and how to navigate it, from the payload rather
+   than from markup: a hardcoded "21x21 - 120 docs" goes stale on any rebuild. */
+function renderMapBadge() {
+  const host = document.getElementById("map-badge");
+  if (!host) return;
+  const axis = DATA.axis || [-1, 1];
+  const size = (DATA.fields[0] && DATA.fields[0].z.length) || DATA.meta.grid_size;
+  host.textContent = "\u03a9 = [" + fmt(axis[0], 1) + ", " + fmt(axis[axis.length - 1], 1) +
+    "]\u00b2 \u00b7 " + size + "\u00d7" + size + " \u00b7 " + DATA.meta.papers +
+    " docs \u00b7 wheel to zoom \u00b7 drag to pan";
 }
 
 function setLayer(name) {
@@ -1946,6 +2293,8 @@ function downloadPrompt() {
 /* ────────────────────────── boot ────────────────────────── */
 function boot() {
   renderHeader();
+  renderMapBadge();
+  renderClusterLegend();
 
   const select = document.getElementById("gap-select");
   clear(select);
@@ -1961,8 +2310,15 @@ function boot() {
   document.getElementById("next-btn").addEventListener("click", function () { selectGap(state.gapIndex + 1); });
   document.getElementById("copy-btn").addEventListener("click", copyPrompt);
   document.getElementById("download-btn").addEventListener("click", downloadPrompt);
+  const resetBtn = document.getElementById("reset-view");
+  if (resetBtn) resetBtn.addEventListener("click", resetView);
+  const ideaBtn = document.getElementById("idea-btn");
+  if (ideaBtn) {
+    if (DATA.idea) ideaBtn.addEventListener("click", toggleIdea);
+    else ideaBtn.classList.add("hidden");
+  }
   const backBtn = document.getElementById("idea-back");
-  if (backBtn) backBtn.addEventListener("click", function () { selectGap(state.gapIndex); });
+  if (backBtn) backBtn.addEventListener("click", function () { setIdea(false); });
 
   document.querySelectorAll("[data-layer]").forEach(function (button) {
     button.addEventListener("click", function () { setLayer(button.dataset.layer); });
@@ -1972,18 +2328,23 @@ function boot() {
     if (event.target && /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName)) return;
     if (event.key === "ArrowLeft") { selectGap(state.gapIndex - 1); event.preventDefault(); }
     if (event.key === "ArrowRight") { selectGap(state.gapIndex + 1); event.preventDefault(); }
-    if (event.key >= "1" && event.key <= "5") {
+    if (event.key >= "1" && event.key <= "9") {
       const layers = ["none"].concat(DATA.fields.map(function (f) { return f.name; }));
-      setLayer(layers[Number(event.key) - 1]);
+      const next = layers[Number(event.key) - 1];
+      if (next) setLayer(next);
     }
     if ((event.key === "i" || event.key === "I") && DATA.idea) {
-      focusIdea();
+      toggleIdea();
       event.preventDefault();
     }
-    if (event.key === "Escape" && DATA.idea) selectGap(state.gapIndex);
+    if (event.key === "Escape" && DATA.idea && state.idea) {
+      setIdea(false);
+      event.preventDefault();
+    }
   });
 
   renderIdea();
+  applyIdeaChrome();
 
   PLOT = buildManifold();
 

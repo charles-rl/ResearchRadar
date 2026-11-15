@@ -39,6 +39,12 @@ from .common import LOGGER, Paths, configure_logging, load_config, resolve_paths
 DEFAULT_CONFIG = Path("config.yaml")
 DEFAULT_OBJECTIVES = ("P_boundary", "W", "G", "S")
 
+#: Tolerance for the "on the chart's outer edge" test. The bound is the grid's
+#: own extent (``|x| = bound`` or ``|y| = bound``), which is exactly ``1.0`` for
+#: the paper's ``[-1, 1]^2`` domain, and the tolerance only absorbs the last-bit
+#: error of ``linspace``/``meshgrid``.
+OUTER_BOUNDARY_ATOL = 1e-9
+
 
 # --------------------------------------------------------------------------- #
 # Dominance
@@ -135,25 +141,45 @@ def group_archetypes(
     return [np.array(sorted(members), dtype=np.int64) for members in clusters]
 
 
+def on_outer_boundary(
+    x: float, y: float, bound: float = 1.0, atol: float = OUTER_BOUNDARY_ATOL
+) -> bool:
+    """True only when the point sits on the chart's outer edge.
+
+    Sec. 4.5 keeps boundary points in the front but asks for them to be read
+    cautiously, so the tag has to be exact. The earlier test -- ``|x| > 0.95 or
+    |y| > 0.95`` -- was a proximity heuristic: on a 21x21 grid one step is 0.1, so
+    it happened to coincide with ``|x| = 1``, but on any finer grid it would tag
+    interior points (at a 41x41 grid, ``(0.95, 0.50)`` is one step inside the
+    edge). It is now the boundary membership test itself, against the grid's own
+    extent, so a spacing change cannot move it.
+    """
+    return bool(
+        abs(abs(float(x)) - float(bound)) <= atol
+        or abs(abs(float(y)) - float(bound)) <= atol
+    )
+
+
 def _describe_point(
     index: int,
     objectives: NDArray[np.float64],
     grid: NDArray[np.float64],
     distance: NDArray[np.float64],
     names: tuple[str, ...],
+    bound: float = 1.0,
 ) -> dict[str, Any]:
     scores = {
         name: float(objectives[index, position]) for position, name in enumerate(names)
     }
+    x = float(grid[index, 0])
+    y = float(grid[index, 1])
     return {
         "grid_index": int(index),
-        "x": float(grid[index, 0]),
-        "y": float(grid[index, 1]),
+        "x": x,
+        "y": y,
         "objectives": scores,
         "ideal_distance": float(distance[index]),
-        "on_outer_boundary": bool(
-            abs(grid[index, 0]) > 0.95 or abs(grid[index, 1]) > 0.95
-        ),
+        "on_outer_boundary": on_outer_boundary(x, y, bound),
     }
 
 
@@ -205,11 +231,14 @@ def extract_front(
 
     distance = ideal_distance(objectives, ideal)
     order = np.argsort(distance[practical_indices])
+    # The chart's outer edge is the candidate set's own extent, read off the grid
+    # instead of assumed: if ``manifold.bounds`` ever moves, the tag follows it.
+    bound = float(np.abs(grid).max())
 
     ranked: list[dict[str, Any]] = []
     for rank, position in enumerate(order, start=1):
         entry = _describe_point(
-            int(practical_indices[position]), objectives, grid, distance, names
+            int(practical_indices[position]), objectives, grid, distance, names, bound
         )
         entry["rank"] = rank
         ranked.append(entry)

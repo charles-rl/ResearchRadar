@@ -14,6 +14,7 @@ from src.pareto import (
     extract_pareto_front,
     group_archetypes,
     ideal_distance,
+    on_outer_boundary,
 )
 
 
@@ -240,3 +241,48 @@ def test_every_non_dominated_point_with_white_space_is_practical() -> None:
     front, practical = extract_pareto_front(objectives, white_space)
     assert practical.size == front.size
     assert np.array_equal(practical, front)
+
+
+# --------------------------------------------------------------------------- #
+# Outer-edge tag
+# --------------------------------------------------------------------------- #
+def test_an_interior_point_is_not_on_the_outer_edge() -> None:
+    """``(+0.10, +0.50)`` is a gap the page showed badged as "outer edge".
+
+    The old test was ``|x| > 0.95 or |y| > 0.95``: a proximity heuristic that
+    happened to equal the boundary at grid step 0.1 and would tag interior points
+    on any finer grid.
+    """
+    assert on_outer_boundary(0.10, 0.50) is False
+    assert on_outer_boundary(-0.30, 0.70) is False
+    assert on_outer_boundary(0.90, 0.90) is False
+    assert on_outer_boundary(0.95, 0.50) is False
+
+
+def test_the_tag_is_reserved_for_the_domain_boundary() -> None:
+    assert on_outer_boundary(1.0, 0.5) is True
+    assert on_outer_boundary(-1.0, 0.5) is True
+    assert on_outer_boundary(0.5, 1.0) is True
+    assert on_outer_boundary(0.5, -1.0) is True
+    assert on_outer_boundary(-1.0, -1.0) is True
+
+
+def test_the_bound_follows_the_grid_instead_of_being_hardcoded() -> None:
+    """``manifold.bounds`` is configuration; the tag must not assume [-1, 1]."""
+    assert on_outer_boundary(2.0, 0.0, bound=2.0) is True
+    assert on_outer_boundary(1.0, 0.0, bound=2.0) is False
+
+
+def test_only_the_perimeter_of_a_dense_grid_is_tagged() -> None:
+    """On a 41x41 grid the old threshold would flag a whole inner ring."""
+    axis = np.linspace(-1.0, 1.0, 41)
+    grid = np.array([[x, y] for x in axis for y in axis])
+    flags = np.array([on_outer_boundary(x, y) for x, y in grid])
+    expected = (np.abs(grid[:, 0]) == 1.0) | (np.abs(grid[:, 1]) == 1.0)
+    assert np.array_equal(flags, expected)
+    assert flags.sum() == 4 * 41 - 4
+    # The ring one step inside the edge must not be tagged.  Only the fully
+    # interior point is checked: a point at x=0.95 with y=1.0 *is* on the edge.
+    inner = np.isclose(np.abs(grid[:, 0]), 0.95) & np.isclose(np.abs(grid[:, 1]), 0.95)
+    assert inner.sum() == 4
+    assert not flags[inner].any()

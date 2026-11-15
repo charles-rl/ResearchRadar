@@ -81,11 +81,39 @@ Per Sec. 4.7 the front is a structured set, not a ranked list: nearby points rep
 
 **7** points in this archetype. Objectives: **P_boundary 0.891**, **W 1.000**, **G 0.835**, **S 0.946**; distance to ideal `0.2054`.
 
-| Regime | K=5 global | K=8 global | K=8 adaptive |
+Eq. 6 regime mixture over the **named corpus regions** (the map colours), global and adaptive weights:
+
+| Corpus region | global | adaptive |
+| --- | --- | --- |
+| ZeroShot-Rep | 0.306 | 0.000 |
+| Sim2Real-Physics | 0.504 | 0.858 |
+| Arm-Manipulation | 0.190 | 0.142 |
+
+Eq. 6 cluster mixture at the two resolutions the boundary objective is computed from (Sec. 3.2). Cluster `c` at K=5 is unrelated to cluster `c` at K=8, so the two blocks are never read across:
+
+##### K=5 Discovery level
+
+| Cluster | Documents | global |
+| --- | --- | --- |
+| K5·1 reinforcement learning framework · domain randomiza… | 25 | 0.398 |
+| K5·2 dexterous manipulation · human demonstrations | 32 | 0.196 |
+| K5·3 successor features · reward functions | 22 | 0.136 |
+| K5·4 latent dynamics · foundation models | 19 | 0.190 |
+| K5·5 real world · vision-language-action vla | 22 | 0.080 |
+
+##### K=8 Reference level
+
+| Cluster | Documents | global | adaptive |
 | --- | --- | --- | --- |
-| ZeroShot-Rep | 0.398 | 0.007 | 0.000 |
-| Sim2Real-Physics | 0.196 | 0.090 | 0.039 |
-| Arm-Manipulation | 0.136 | 0.153 | 0.000 |
+| K8·1 Region 8 | 1 | 0.007 | 0.000 |
+| K8·2 latent dynamics · models | 11 | 0.090 | 0.039 |
+| K8·3 zero-shot sim-to-real transfer · contact-rich manip… | 22 | 0.153 | 0.000 |
+| K8·4 human videos · real world | 33 | 0.241 | 0.416 |
+| K8·5 behavioral foundation · test time | 13 | 0.062 | 0.000 |
+| K8·6 reinforcement learning systems · successor features | 21 | 0.206 | 0.126 |
+| K8·7 domain randomization · bipedal | 14 | 0.240 | 0.418 |
+| K8·8 hand · robotic | 5 | 0.001 | 0.000 |
+
 
 Mixture entropy `H = 0.917`; effective contributing documents `N_eff = 64.3`; top-3 weight concentration `T3 = 0.078`; 5th-neighbour distance `d5 = 0.213`; relative uncertainty `u = 0.4700` (RBF surrogate; Matern `0.4510`).
 
@@ -109,11 +137,39 @@ Terms present in **both** lenses (strongest evidence): *(none)*
 
 **3** points in this archetype. Objectives: **P_boundary 0.776**, **W 0.974**, **G 0.948**, **S 0.741**; distance to ideal `0.3472`.
 
-| Regime | K=5 global | K=8 global | K=8 adaptive |
+Eq. 6 regime mixture over the **named corpus regions** (the map colours), global and adaptive weights:
+
+| Corpus region | global | adaptive |
+| --- | --- | --- |
+| ZeroShot-Rep | 0.446 | 0.383 |
+| Sim2Real-Physics | 0.071 | 0.000 |
+| Arm-Manipulation | 0.483 | 0.617 |
+
+Eq. 6 cluster mixture at the two resolutions the boundary objective is computed from (Sec. 3.2). Cluster `c` at K=5 is unrelated to cluster `c` at K=8, so the two blocks are never read across:
+
+##### K=5 Discovery level
+
+| Cluster | Documents | global |
+| --- | --- | --- |
+| K5·1 reinforcement learning framework · domain randomiza… | 25 | 0.039 |
+| K5·2 dexterous manipulation · human demonstrations | 32 | 0.194 |
+| K5·3 successor features · reward functions | 22 | 0.211 |
+| K5·4 latent dynamics · foundation models | 19 | 0.244 |
+| K5·5 real world · vision-language-action vla | 22 | 0.312 |
+
+##### K=8 Reference level
+
+| Cluster | Documents | global | adaptive |
 | --- | --- | --- | --- |
-| ZeroShot-Rep | 0.039 | 0.000 | 0.000 |
-| Sim2Real-Physics | 0.194 | 0.162 | 0.740 |
-| Arm-Manipulation | 0.211 | 0.105 | 0.001 |
+| K8·1 Region 8 | 1 | 0.000 | 0.000 |
+| K8·2 latent dynamics · models | 11 | 0.162 | 0.740 |
+| K8·3 zero-shot sim-to-real transfer · contact-rich manip… | 22 | 0.105 | 0.001 |
+| K8·4 human videos · real world | 33 | 0.322 | 0.081 |
+| K8·5 behavioral foundation · test time | 13 | 0.229 | 0.179 |
+| K8·6 reinforcement learning systems · successor features | 21 | 0.132 | 0.000 |
+| K8·7 domain randomization · bipedal | 14 | 0.017 | 0.000 |
+| K8·8 hand · robotic | 5 | 0.034 | 0.000 |
+
 
 Mixture entropy `H = 0.920`; effective contributing documents `N_eff = 60.3`; top-3 weight concentration `T3 = 0.083`; 5th-neighbour distance `d5 = 0.243`; relative uncertainty `u = 0.4704` (RBF surrogate; Matern `0.4521`).
 
@@ -137,11 +193,39 @@ Terms present in **both** lenses (strongest evidence): *(none)*
 
 **2** points in this archetype. Objectives: **P_boundary 0.995**, **W 1.000**, **G 1.000**, **S 0.638**; distance to ideal `0.3625`.
 
-| Regime | K=5 global | K=8 global | K=8 adaptive |
+Eq. 6 regime mixture over the **named corpus regions** (the map colours), global and adaptive weights:
+
+| Corpus region | global | adaptive |
+| --- | --- | --- |
+| ZeroShot-Rep | 0.406 | 0.050 |
+| Sim2Real-Physics | 0.356 | 0.181 |
+| Arm-Manipulation | 0.238 | 0.769 |
+
+Eq. 6 cluster mixture at the two resolutions the boundary objective is computed from (Sec. 3.2). Cluster `c` at K=5 is unrelated to cluster `c` at K=8, so the two blocks are never read across:
+
+##### K=5 Discovery level
+
+| Cluster | Documents | global |
+| --- | --- | --- |
+| K5·1 reinforcement learning framework · domain randomiza… | 25 | 0.268 |
+| K5·2 dexterous manipulation · human demonstrations | 32 | 0.181 |
+| K5·3 successor features · reward functions | 22 | 0.194 |
+| K5·4 latent dynamics · foundation models | 19 | 0.251 |
+| K5·5 real world · vision-language-action vla | 22 | 0.107 |
+
+##### K=8 Reference level
+
+| Cluster | Documents | global | adaptive |
 | --- | --- | --- | --- |
-| ZeroShot-Rep | 0.268 | 0.002 | 0.000 |
-| Sim2Real-Physics | 0.181 | 0.108 | 0.000 |
-| Arm-Manipulation | 0.194 | 0.113 | 0.000 |
+| K8·1 Region 8 | 1 | 0.002 | 0.000 |
+| K8·2 latent dynamics · models | 11 | 0.108 | 0.000 |
+| K8·3 zero-shot sim-to-real transfer · contact-rich manip… | 22 | 0.113 | 0.000 |
+| K8·4 human videos · real world | 33 | 0.252 | 0.379 |
+| K8·5 behavioral foundation · test time | 13 | 0.115 | 0.000 |
+| K8·6 reinforcement learning systems · successor features | 21 | 0.252 | 0.440 |
+| K8·7 domain randomization · bipedal | 14 | 0.156 | 0.181 |
+| K8·8 hand · robotic | 5 | 0.001 | 0.000 |
+
 
 Mixture entropy `H = 0.973`; effective contributing documents `N_eff = 61.8`; top-3 weight concentration `T3 = 0.090`; 5th-neighbour distance `d5 = 0.279`; relative uncertainty `u = 0.4704` (RBF surrogate; Matern `0.4520`).
 

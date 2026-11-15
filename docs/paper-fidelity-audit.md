@@ -222,3 +222,65 @@ of the corpus (`T3 ≈ 0.1`, `N_eff` in the tens). The Pareto counts differ from
 the paper's because the corpus, its clustering and its field shapes differ; the
 *order* of magnitude and the reduction from the non-dominated set to the
 practical front are consistent.
+
+---
+
+## 6. Appendix A: the verbalization prompt and the audit checklist
+
+Sections 1–5 cover the mathematics. Appendix A is text, not equations, and it is
+the part a reader actually pastes into a model, so it is pinned to the paper's own
+words rather than paraphrased. `tests/test_prompt_verbatim.py` re-derives both
+artifacts from `docs/papers/foundation/2610.25662v1.md` on every test run.
+
+### 6.1 A.1 prompt template — verbatim, with one documented substitution
+
+`docs/kmo_prompt_template_A1.txt` is the A.1 text. Compared token for token
+against the paper section (whitespace reflowed, dash glyphs folded) the two are
+identical except for:
+
+| Deviation | Why |
+| --- | --- |
+| `composites` → `robotics` (Rule 3) | The paper's case study is aerodynamics; this corpus is robot learning. This is the **only** semantic edit, it is the only line on which the in-use template differs from `docs/kmo_prompt_template_A1.original.txt`, and `src/report.py --verify-only` fails if a second edit appears. |
+| `*evidence package**` → `**evidence package**` | Unbalanced bold marker in the PDF→Markdown extraction. |
+| `` `source docs` `` → `` `source_docs` `` | The identifier was split across a line by the extraction. |
+| duplicated `` - `mixture_entropy_H`, `effective_contributing_documents`, `` bullet | The extraction repeats the last bullet of "The package contains:" once before "Rules (binding)". |
+| `**Serendipity** from … graded by df.**` → `**Serendipity from … graded by df.**` | Misplaced bold pair in the extraction. |
+| two stray ``` fences around *Deliverables* | Markdown artifact; the paper has no code block there. |
+| em dash vs `-`/en dash | The extraction is inconsistent about dashes. Glyph-only difference; the comparison folds every dash variant. |
+
+None of these change a rule, a threshold, or an obligation. Specifically, the
+numbers A.1 states are the numbers `src/audit.py` enforces: Task A
+**200–280** words, Task B **exactly 45** words, `df >= 4` for an emergent shared
+topic, `df <= 3` for a single-source hypothesis, and `source_docs` cited for every
+`df <= 3` term. A test asserts this agreement in both directions, so editing
+either the prompt or the audit thresholds alone fails the suite.
+
+The evidence package the prompt is filled with carries exactly the fields A.1
+names — `theme_lens_L2`, `concentration_lens_L1` (with `df`, and `source_docs`
+only where `df <= 3`), `contributing_documents_top3`, `mixture_entropy_H`,
+`effective_contributing_documents`, `relative_uncertainty_u` — via
+`src.report.prompt_evidence_package`. The dashboard and the Markdown report call
+the same `render_prompt_text`, so the on-screen prompt, the copy button, the
+downloaded `.txt`, and `output/KMO_PROMPT_TOP1.txt` are byte-identical.
+
+### 6.2 A.2 audit protocol — eight items, eight checks
+
+The paper lists eight audit items; `src/audit.py` runs eight checks in the same
+order, and a test pins the item ids to the bullets so an item cannot be dropped
+silently.
+
+| A.2 item | Check in `src/audit.py` | Implementation note |
+| --- | --- | --- |
+| Length compliance | `length_compliance` | Task A in `[200, 280]`, Task B exactly 45 (`task_b_tolerance = 0`). |
+| Evidence coverage | `evidence_coverage` | Every supplied term must appear in the text or be explicitly set aside (A.1 rule 4). |
+| Lens discipline | `lens_discipline` | L2 terms define the topic; L1-only terms stay supporting evidence. |
+| Low-frequency provenance | `low_frequency_provenance` | Every L1-only `df <= 3` term needs a sentence that presents it as limited-source and cites `[doc N]`. |
+| Unsupported-claim audit | `unsupported_claim_audit` | Mechanism verbs, material names, percentages and decimal performance numbers without a hedge are reported for a human. |
+| Novelty wording | `novelty_wording` | Global claims ("for the first time", "state of the art") fail unless made corpus-relative. |
+| Uncertainty disclosure | `uncertainty_disclosure` | Both `relative_uncertainty_u` and `effective_contributing_documents` must be stated in Task A. |
+| Evidence trace | `evidence_trace` | The `Evidence used:` list must record every used term with a `df`. |
+
+A.2's own disclaimer is carried into the report the audit prints: it "is intended
+to expose unsupported extrapolation rather than to claim a mathematical guarantee
+of hallucination-free generation". The checks are conservative heuristics, the
+audit never rewrites the text, and a failure is a review item, not a verdict.

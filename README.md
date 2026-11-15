@@ -280,22 +280,34 @@ from `models/F2LLM-*` with the recipe above only if you need to re-register.
 ## The dashboard
 
 `output/index.html` is a single self-contained page: the corpus, the four
-objective fields, and one evidence package per gap are baked into an inline JSON
-payload, so it opens straight from the filesystem with no server and no build
-step. Plotly and Lucide load from CDNs (pinned, with SRI hashes); all styling is
-plain CSS inlined in the page, so there is no CSS framework in the load path.
+objective fields plus the reliability diagnostic, and one evidence package per
+gap are baked into an inline JSON payload, so it opens straight from the
+filesystem with no server and no build step. Plotly and Lucide load from CDNs
+(pinned, with SRI hashes); all styling is plain CSS inlined in the page, so there
+is no CSS framework in the load path.
 
-* **Left panel** — the manifold on `[-1, 1]^2`, papers coloured by regime, the 60
-  practical gaps as stars, and layer buttons (keys `1`-`5`) that swap the
-  background between `P_boundary`, `W`, `G`, and `S`. The axes are pinned 1:1, so
-  the plot stays square and letterboxes inside a wide pane. The regime legend is
-  generated from the payload, so it cannot drift from `config.yaml`, and the gap
-  stars use one neutral intensity ramp rather than the regime hues.
+* **Left panel** — the manifold on `[-1, 1]^2` (drawn as an explicit frame, since
+the axes are 1:1 and letterbox inside a wide pane), papers coloured by region,
+the practical gaps as stars, and layer buttons (keys `1`-`6`) that swap the
+background between `P_boundary`, `W`, `G`, `S`, and `R` (model-based
+reliability: a Sec. 3.7 diagnostic, deliberately not a fifth Pareto objective).
+The wheel zooms, a drag pans, and both the toolbar button and a double-click
+reset the view to the framed domain; the badge under the plot states the domain
+and the interaction. The region legend is generated from the payload, so it
+cannot drift from `config.yaml`, and the gap stars use one neutral intensity ramp
+rather than the region hues.
 * **Right panel** — the selected gap's evidence package: a 4-axis objective
-  radar, support statistics, the regime mixture, the top-5 anchor papers, the
-  L2/L1 lexical split, and the Appendix A.1 prompt with a copy button.
+radar, support statistics, the three Eq. 6 mixtures (named regions, all five K=5
+clusters, all eight K=8 clusters), the top-5 anchor papers, the L2/L1 lexical
+split, and the Appendix A.1 prompt with a copy button.
 * **Navigation** — click a star, use the dropdown, or press the arrow keys.
   `#gap=<rank>` deep-links a gap.
+* **Your idea** — when `src.explore` has placed an external document, it appears
+as a cyan diamond and is **off by default**: the drawer always opens on the
+selected gap. The `i idea` button (or the `i` key, or the marker) toggles it on,
+which adds the document's `[P, W, G, S]` polygon to the scorecard as a dashed
+outline and its evidence card under the scorecard. Selecting any gap turns the
+overlay off again, so the two never fight over the top of the inspector.
 
 The page is responsive without a framework: two stacked panes below 1024px, a
 side-by-side split above it, and a 3x2 stat grid in the header on phones.
@@ -497,7 +509,10 @@ tests/test_sanitize.py            bibliography and citation strippers
 tests/test_representation.py      n-gram matrix, word index, persistence
 tests/test_manifold.py            the equations that invite silent drift
 tests/test_audit.py               the eight Appendix A.2 checks
-tests/test_pareto.py              dominance orientation, archetype grouping
+tests/test_pareto.py              dominance orientation, archetype grouping,
+                                  the exact outer-edge tag
+tests/test_regimes.py             cluster naming, the K=5/K=8 mixture key
+tests/test_prompt_verbatim.py     Appendix A.1/A.2 pinned to the paper's own text
 tests/test_seed_first.py          seed years, harvest window, front matter
                                   and version-insensitive seed deduplication
 tests/dashboard_smoke.js          offline DOM-shim test of the dashboard script

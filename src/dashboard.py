@@ -41,6 +41,7 @@ from .common import (
     resolve_asset_path,
     resolve_paths,
 )
+from .regimes import cluster_catalog
 from .report import (
     EMERGENT_DF,
     LIMITED_SOURCE_DF,
@@ -81,17 +82,45 @@ def dashboard_palette(labels: list[str]) -> dict[str, str]:
 
 
 #: Plotly reads ``z[i][j]`` at ``(y=axis[i], x=axis[j])``, so the field matrix is
-#: transposed by ``objective_field`` before it reaches the browser.
-FIELD_ORDER = ("P_boundary", "W", "G", "S")
+#: transposed by ``objective_field`` before it reaches the browser.  ``R`` is the
+#: model-based reliability of Sec. 3.7: a diagnostic layer, deliberately *not* a
+#: fifth Pareto objective (Sec. 4.3 - maximizing low uncertainty would favour
+#: well-populated regions over supported gaps).
+FIELD_ORDER = ("P_boundary", "W", "G", "S", "R")
+
+#: Colours for the K=5/K=8 cluster mixture key. Kept clear of
+#: ``DASHBOARD_PALETTE``: those hues identify the named corpus regions that colour
+#: the map dots, and a cluster that borrowed one would read as that region.
+CLUSTER_PALETTE = (
+    "#a78bfa",
+    "#f472b6",
+    "#facc15",
+    "#38bdf8",
+    "#a3e635",
+    "#fb923c",
+    "#2dd4bf",
+    "#e879f9",
+)
 
 
 # --------------------------------------------------------------------------- #
 # Payload assembly
 # --------------------------------------------------------------------------- #
 def paper_records(
-    papers: list[dict[str, Any]], coordinates: np.ndarray
+    papers: list[dict[str, Any]],
+    coordinates: np.ndarray,
+    labels_k5: np.ndarray,
+    labels_k8: np.ndarray,
 ) -> list[dict[str, Any]]:
-    """One record per corpus paper, with chart coordinates and an arXiv URL."""
+    """One record per corpus paper, with chart coordinates and an arXiv URL.
+
+    ``cluster5``/``cluster8`` are the paper's *raw* K-means label at each
+    resolution, i.e. the index of its share in ``mixture_k5_global`` /
+    ``mixture_k8_global``. The page uses them only to look up the cluster's name
+    and colour; the map dots stay coloured by the named region, because the
+    TF-IDF partitions interleave on a 2-D projection (silhouette 0.11 at K=5,
+    -0.08 at K=8) and colouring by them would produce confetti.
+    """
     records: list[dict[str, Any]] = []
     for position, paper in enumerate(papers):
         authors = [str(name) for name in paper.get("authors") or []]
@@ -104,6 +133,8 @@ def paper_records(
                 "year": int(paper["year"]),
                 "regime_id": int(paper["regime_id"]),
                 "regime_label": str(paper["regime_label"]),
+                "cluster5": int(labels_k5[position]),
+                "cluster8": int(labels_k8[position]),
                 "x": round(float(coordinates[position, 0]), 4),
                 "y": round(float(coordinates[position, 1]), 4),
                 "url": paper_source_url(paper),
@@ -116,12 +147,24 @@ def paper_records(
 def field_records(
     grid_data: dict[str, Any], grid_size: int, names: list[str]
 ) -> list[dict[str, Any]]:
-    """The four discovery objectives as browser-ready heatmap matrices."""
+    """The objectives plus reliability as browser-ready heatmap matrices."""
     objectives = np.asarray(grid_data["objectives"], dtype=np.float64)
     records: list[dict[str, Any]] = []
-    for name in names:
-        position = names.index(name)
-        matrix = objective_field(objectives, position, grid_size)
+    matrices: list[tuple[str, np.ndarray]] = [
+        (name, objectives[:, names.index(name)]) for name in names
+    ]
+    # Reliability rides the same heatmap path as the objectives but is not one:
+    # Sec. 3.7's R is a model diagnostic, so it is appended after them and never
+    # reaches the Pareto search.
+    if "reliability" in grid_data:
+        matrices.append(
+            ("R", np.asarray(grid_data["reliability"], dtype=np.float64))
+        )
+    for name, values in matrices:
+        # ``objective_field`` takes a matrix; each column here is one field.
+        matrix = objective_field(
+            np.asarray(values, dtype=np.float64).reshape(-1, 1), 0, grid_size
+        )
         records.append(
             {
                 "name": name,
@@ -131,6 +174,19 @@ def field_records(
             }
         )
     return records
+
+
+def _cluster_vector(block: dict[str, Any], key: str) -> list[float]:
+    """One mixture component list, ordered by raw cluster id.
+
+    The evidence package carries the K=5/K=8 items with their labels so the
+    Markdown report can print them; the page already has every label in
+    ``payload["clusters"]``, so it only needs the numbers. Arrays indexed by
+    cluster id keep the 13-cluster payload at ~3 KB instead of ~22 KB, and the
+    lookup in the browser is ``DATA.clusters[key].items[id]``.
+    """
+    items = sorted(block["items"], key=lambda item: int(item["id"]))
+    return [round(float(item[key]), 4) for item in items if key in item]
 
 
 def gap_records(
@@ -191,6 +247,16 @@ def gap_records(
                 "H": package["mixture_entropy_H"],
                 "u": package["relative_uncertainty_u"],
                 "mixture": package["regime_mixture"],
+                "cluster_mixture": {
+                    key: {
+                        "k": int(block["k"]),
+                        "global": _cluster_vector(block, "global"),
+                        **({"adaptive": _cluster_vector(block, "adaptive")}
+                           if block["items"] and "adaptive" in block["items"][0]
+                           else {}),
+                    }
+                    for key, block in package["cluster_mixture"].items()
+                },
                 "anchors": anchors,
                 "theme_lens": [
                     {
@@ -254,6 +320,9 @@ def build_payload(
 
     _, packages = build_gap_packages(corpus, grid_data, front, config, paths)
     gaps = gap_records(front, packages, template)
+    labels_k5 = np.asarray(grid_data["labels_k5"], dtype=np.int64)
+    labels_k8 = np.asarray(grid_data["labels_k8"], dtype=np.int64)
+    clusters = cluster_records(corpus["papers"], labels_k5, labels_k8)
 
     axis = np.round(
         np.linspace(
@@ -313,14 +382,56 @@ def build_payload(
         },
         "regimes": regimes,
         "papers": paper_records(
-            corpus["papers"], np.asarray(grid_data["doc_coords"], dtype=np.float64)
+            corpus["papers"],
+            np.asarray(grid_data["doc_coords"], dtype=np.float64),
+            labels_k5,
+            labels_k8,
         ),
         "axis": [float(value) for value in axis],
         "fields": field_records(grid_data, grid_size, names),
         "field_order": list(FIELD_ORDER),
+        "clusters": clusters,
         "gaps": gaps,
         "idea": idea_record(paths),
     }
+
+
+def cluster_records(
+    papers: list[dict[str, Any]],
+    labels_k5: np.ndarray,
+    labels_k8: np.ndarray,
+) -> dict[str, dict[str, Any]]:
+    """Name both resolutions and attach the mixture key's colours.
+
+    The mixture vectors in ``manifold_grid.npz`` are indexed by the raw K-means
+    label, so the items are returned in that order and ``id`` is the mixture
+    index. ``order`` is the display rank (largest cluster first) and is what the
+    colour follows, so the biggest cluster always gets the first hue.
+    """
+    catalog = cluster_catalog(papers, {5: labels_k5, 8: labels_k8})
+    labels = {5: "Discovery level", 8: "Reference level"}
+    records: dict[str, dict[str, Any]] = {}
+    for key, k in (("k5", 5), ("k8", 8)):
+        entries = catalog.get(key, [])
+        records[key] = {
+            "k": k,
+            "level": labels[k],
+            "items": [
+                {
+                    "id": int(entry["id"]),
+                    "order": int(entry["order"]),
+                    "label": str(entry["label"]),
+                    "terms": list(entry["terms"]),
+                    "size": int(entry["size"]),
+                    "summary": str(entry["summary"]),
+                    "color": CLUSTER_PALETTE[
+                        int(entry["order"]) % len(CLUSTER_PALETTE)
+                    ],
+                }
+                for entry in entries
+            ],
+        }
+    return records
 
 
 def _number(value: Any, fallback: float = 0.0) -> float:
@@ -595,6 +706,77 @@ def extract_payload(document: str) -> dict[str, Any]:
     return payload
 
 
+def verify_fields(
+    payload: dict[str, Any], document: str, grid_size: int
+) -> bool:
+    """Every field layer must be a full matrix *and* have a toolbar button."""
+    ok = True
+    if any(len(field["z"]) != grid_size for field in payload["fields"]):
+        LOGGER.error("A field matrix is not %d x %d", grid_size, grid_size)
+        ok = False
+    if [field["name"] for field in payload["fields"]] != list(FIELD_ORDER):
+        LOGGER.error(
+            "Field layers are %s, expected %s",
+            [field["name"] for field in payload["fields"]],
+            list(FIELD_ORDER),
+        )
+        ok = False
+    # The buttons are static markup, so a payload-side layer with no button is
+    # unusable and a button with no layer toggles nothing. Neither failure is
+    # visible in the rendered page, and the page's script cannot report it.
+    for field in payload["fields"]:
+        if f'data-layer="{field["name"]}"' not in document:
+            LOGGER.error("No toolbar button for field layer %s", field["name"])
+            ok = False
+    return ok
+
+
+def verify_clusters(payload: dict[str, Any], papers: int) -> bool:
+    """The K=5/K=8 mixture key must name every cluster and partition the corpus.
+
+    An earlier build fed the K=5 cluster vector into a table whose rows were the
+    three named regions: it printed cluster shares under region names and dropped
+    clusters 3-4 (and 3-7 of K=8). Asserting the shape here is what keeps that
+    from coming back silently.
+    """
+    ok = True
+    clusters = payload.get("clusters", {})
+    for key, k in (("k5", 5), ("k8", 8)):
+        block = clusters.get(key) or {}
+        items = block.get("items", [])
+        if len(items) != k:
+            LOGGER.error(
+                "Cluster key %s has %d entries, expected %d", key, len(items), k
+            )
+            ok = False
+            continue
+        if sorted(item["id"] for item in items) != list(range(k)):
+            LOGGER.error("Cluster key %s ids are not 0..%d", key, k - 1)
+            ok = False
+        if sum(item["size"] for item in items) != papers:
+            LOGGER.error("Cluster key %s does not partition the corpus", key)
+            ok = False
+    if any(
+        not 0 <= paper["cluster5"] < 5 or not 0 <= paper["cluster8"] < 8
+        for paper in payload["papers"]
+    ):
+        LOGGER.error("A paper's cluster label falls outside its partition")
+        ok = False
+    for gap in payload["gaps"]:
+        for key, k in (("k5", 5), ("k8", 8)):
+            vector = gap["cluster_mixture"][key]["global"]
+            if len(vector) != k or abs(sum(vector) - 1.0) > 0.01:
+                LOGGER.error(
+                    "Gap #%d %s mixture is %d long and sums to %.3f",
+                    gap["rank"],
+                    key,
+                    len(vector),
+                    sum(vector),
+                )
+                ok = False
+    return ok
+
+
 def verify_dashboard(paths: Paths, min_bytes: int = 150_000) -> bool:
     """Check the page is self-contained, populated, and agrees with the artifacts."""
     if not paths.dashboard.is_file():
@@ -659,16 +841,8 @@ def verify_dashboard(paths: Paths, min_bytes: int = 150_000) -> bool:
         )
         ok = False
     grid_size = round(occupancy**0.5)
-    if any(len(field["z"]) != grid_size for field in payload["fields"]):
-        LOGGER.error("A field matrix is not %d x %d", grid_size, grid_size)
-        ok = False
-    if [field["name"] for field in payload["fields"]] != list(FIELD_ORDER):
-        LOGGER.error(
-            "Field layers are %s, expected %s",
-            [field["name"] for field in payload["fields"]],
-            list(FIELD_ORDER),
-        )
-        ok = False
+    ok = verify_fields(payload, document, grid_size) and ok
+    ok = verify_clusters(payload, expected_papers) and ok
 
     # Coordinates must round-trip: the chart is the whole point of the page.
     drift = max(
@@ -730,6 +904,22 @@ def verify_dashboard(paths: Paths, min_bytes: int = 150_000) -> bool:
             ok = False
         if not 0.0 <= gap["objectives"]["W"] <= 1.0:
             LOGGER.error("Gap #%d has W out of range", gap["rank"])
+            ok = False
+        # The outer-edge tag is exact boundary membership: |x| = 1 or |y| = 1.
+        # Recomputed from the payload's own rounded coordinates so an interior
+        # point can never be badged (the old > 0.95 test could, on a finer grid).
+        expected_edge = (
+            abs(abs(gap["x"]) - 1.0) <= 1e-9 or abs(abs(gap["y"]) - 1.0) <= 1e-9
+        )
+        if bool(gap["on_outer_boundary"]) != expected_edge:
+            LOGGER.error(
+                "Gap #%d at (%+.2f, %+.2f) has on_outer_boundary=%s, expected %s",
+                gap["rank"],
+                gap["x"],
+                gap["y"],
+                gap["on_outer_boundary"],
+                expected_edge,
+            )
             ok = False
 
     # The #1 prompt must match the standalone artifact byte for byte.

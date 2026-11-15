@@ -23,6 +23,7 @@ from src.regimes import (
     _is_fragment,
     _phrase_key,
     apply_to_papers,
+    cluster_catalog,
     cluster_on_chart,
     cluster_terms,
     discover_regimes,
@@ -537,3 +538,63 @@ def test_harvest_cli_writes_under_the_config_directory(tmp_path) -> None:
     # than finding (and reporting on) a corpus in the working directory.
     with pytest.raises(SystemExit, match=r"cfg/data/corpus\.json"):
         main(["--config", str(config_dir / "config.yaml"), "--verify-only"])
+
+
+# --------------------------------------------------------------------------- #
+# Cluster catalog (the REGIME MIXTURE key)
+# --------------------------------------------------------------------------- #
+def test_cluster_catalog_indexes_items_by_raw_mixture_position() -> None:
+    """``id`` must be the mixture index, not the display rank.
+
+    Eq. 6's vector is indexed by the partition's raw labels. Naming renumbers
+    clusters by size, so an implementation that returns the display order makes
+    every ``K5·n`` row quote a different cluster's share.
+    """
+    papers = _papers(
+        (
+            "Dexterous grasping with tactile sensing",
+            "Legged locomotion over rough terrain",
+        )
+    )
+    # Raw label 1 is the larger cluster, so the display rank of each differs.
+    labels = np.array([0] * 4 + [1] * 8, dtype=np.int64)
+    catalog = cluster_catalog(papers, {2: labels})
+    items = catalog["k2"]
+    assert [item["id"] for item in items] == [0, 1]
+    assert items[0]["size"] == 4
+    assert items[1]["size"] == 8
+    # Display rank: the big cluster becomes region 0.
+    assert items[1]["order"] == 0
+    assert items[0]["order"] == 1
+    assert all(item["label"] for item in items)
+
+
+def test_cluster_catalog_names_every_resolution_and_partitions_the_corpus() -> None:
+    papers = _papers(
+        (
+            "Dexterous grasping with tactile sensing",
+            "Legged locomotion over rough terrain",
+            "Vision-language-action policies for manipulation",
+        )
+    )
+    rng = np.random.default_rng(0)
+    partitions = {
+        k: rng.integers(0, k, size=len(papers)).astype(np.int64) for k in (3, 5)
+    }
+    # Guarantee every cluster is non-empty, so naming has evidence for each.
+    for k, labels in partitions.items():
+        labels[:k] = np.arange(k)
+    catalog = cluster_catalog(papers, partitions)
+    assert set(catalog) == {"k3", "k5"}
+    for key, k in (("k3", 3), ("k5", 5)):
+        items = catalog[key]
+        assert [item["id"] for item in items] == list(range(k))
+        assert sorted(item["order"] for item in items) == list(range(k))
+        assert sum(item["size"] for item in items) == len(papers)
+
+
+def test_cluster_catalog_rejects_a_partition_with_missing_clusters() -> None:
+    """A 5-vector cannot be indexed by a partition whose labels stop at 3."""
+    papers = _papers(("Dexterous grasping with tactile sensing",))
+    with pytest.raises(SystemExit):
+        cluster_catalog(papers, {5: np.array([0, 1, 2, 3] * 3, dtype=np.int64)})

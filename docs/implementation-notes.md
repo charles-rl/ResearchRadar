@@ -299,12 +299,60 @@ because a reader will otherwise expect more certainty than they can give.
   Every panel is now built with `createElement` plus `textContent`; the only
   HTML strings left are Plotly hover labels, which Plotly renders itself and
   which are escaped at construction.
+- **A mixture vector belongs to one partition and one labelling.**
+  `manifold_grid.npz` stores `mixture_k5_global` as a 5-vector indexed by the
+  K-means label, and `mixture_k8_global` as an 8-vector. `build_evidence_package`
+  enumerated the *named corpus regions* (three of them) and indexed those
+  vectors with the region position, so the REGIME MIXTURE panel printed the
+  first three K=5 clusters under region names and dropped clusters 3-4 of K=5
+  and 3-7 of K=8 — 3 of 13 rows, with the wrong labels on all of them. The two
+  mixtures are now computed from their own partition: `regime_mixture` applies
+  Eq. 6 to `doc_regime` (global and adaptive weights), and `cluster_mixture`
+  carries the real K=5/K=8 vectors with names from `regimes.cluster_catalog`.
+  `src.dashboard --verify-only` asserts both vectors are complete and sum to 1.
+- **Naming a partition renumbers it; the mixture does not.** `label_partition`
+  orders clusters by size for display, so `cluster_catalog` returns each entry
+  with **both** ids: `id` is the raw K-means label (the mixture index) and
+  `order` is the display rank (which drives the colour). Returning only the
+  display order mislabels every row of the table against its own share.
+- **The K=5/K=8 partitions cannot colour the map.** Their silhouette in
+  TF-IDF space is high, but on the 2-D chart it is 0.11 at K=5 and -0.08 at K=8:
+  drawing documents by those labels produces confetti, which is why
+  `src/regimes` partitions *chart coordinates* for the label/colour taxonomy and
+  clusters the representation only for the boundary objective. The dashboard
+  therefore shows the clusters as a mixer key (square swatches, `K5·n` codes)
+  and keeps the dots on the named regions; the tooltip says so.
+- **"Outer edge" was a proximity test, not a boundary test.**
+  `abs(x) > 0.95 or abs(y) > 0.95` happens to equal `|x| = 1` at grid step 0.1
+  and tags interior points (e.g. `(0.95, 0.50)`) as soon as the grid is finer.
+  The tag is now exact membership against the grid's own extent
+  (`pareto.on_outer_boundary`, bound read from the candidate set), and
+  `src.dashboard --verify-only` recomputes it from the payload's coordinates so
+  an interior gap cannot be badged.
 
 ## Traps found while doing the visual pass
 
 These only show up when the page is actually rendered, which is why the design
 work is checked with real Chromium screenshots at three widths rather than by
 reading the template.
+
+- **A utility class that can be out-specified is not a class.** `.hidden` was
+  `display: none` at specificity (0,1,0), and `.drawer-body > section` is
+  `display: block` at (0,1,1): the idea card kept its `hidden` class and stayed
+  on screen anyway, so the drawer opened with "your idea" pinned above every
+  selected gap. The bug looked like state, not CSS, and the DOM-level smoke test
+  passed because the class really was applied. `.hidden` is now
+  `display: none !important`, and the idea overlay is off by default.
+- **A border drawn below a heatmap is not a border.** The `[-1, 1]^2` frame was
+  one `layer: "below"` rect, which the field overlays painted over: the frame
+  vanished exactly when a layer was selected. It is now two shapes — the faint
+  fill below the traces, a 1px outline above them — so the domain stays framed
+  at every layer.
+- **Three reset paths, three different views.** The toolbar button set explicit
+  ranges, while Plotly's modebar house and `doubleClick: "reset"` request
+  `autorange`, which frames the data instead of the domain. A `plotly_relayout`
+  listener reroutes any `autorange` request to the explicit frame; the guard
+  cannot loop because the relayout it issues sets ranges.
 
 - **`cdn.tailwindcss.com` sends no CORS header.** With `crossorigin="anonymous"`
   plus an SRI hash the browser refuses it outright on any `http://` origin:

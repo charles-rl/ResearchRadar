@@ -66,14 +66,12 @@ class Node {
 }
 
 const registry = new Map();
-const layerButtons = [1, 2, 3, 4, 5].map(() => {
+const LAYER_NAMES = ["none", "P_boundary", "W", "G", "S", "R"];
+const layerButtons = LAYER_NAMES.map((layer) => {
   const b = new Node("button");
-  b.dataset.layer = "none";
+  b.dataset.layer = layer;
+  b.textContentValue = layer === "none" ? "Papers + gaps" : layer;
   return b;
-});
-["none", "P_boundary", "W", "G", "S"].forEach((layer, i) => {
-  layerButtons[i].dataset.layer = layer;
-  layerButtons[i].textContentValue = ["Papers + gaps", "P_boundary", "W", "G", "S"][i];
 });
 
 const documentStub = {
@@ -112,6 +110,7 @@ const Plotly = {
     return Promise.resolve();
   },
   restyle(element, update, indices) { plotlyCalls.push({ kind: "restyle", el: resolve(element), update, indices }); return Promise.resolve(); },
+  relayout(element, update) { plotlyCalls.push({ kind: "relayout", el: resolve(element), update }); return Promise.resolve(); },
   react(element, traces, layout) { plotlyCalls.push({ kind: "react", el: resolve(element), traces, layout }); return Promise.resolve(); },
   Plots: { resize() {} },
 };
@@ -171,6 +170,137 @@ if (failure) {
 }
 
 let manifoldTraces = [];
+
+/* The drawer's own select element is the authoritative "which gap is selected"
+   state for a black-box assertion: it is written by renderDrawer on every
+   selection, so it cannot drift from what the panel shows. */
+function selectedGapIndex() {
+  return Number(documentStub.getElementById("gap-select").value);
+}
+
+/* Right-panel diagnostics: every K=5/K=8 cluster must be named in the mixture
+   table and keyed in the legend, and the map badge must come from the payload. */
+function checkDiagnostics() {
+  /* The mixture panel carries three blocks: the named regions that colour the map,
+     and *every* cluster of the K=5 and K=8 partitions the boundary objective is
+     computed from. It used to print a 5-vector of cluster shares under three
+     region labels, so clusters 3 and 4 (and 3..7 of K=8) were simply absent. */
+  const mixRows = documentStub.getElementById("mixture").all().filter((n) => n.className === "mix-row");
+  const expectedMix = DATA.regimes.length + DATA.clusters.k5.items.length + DATA.clusters.k8.items.length;
+  if (mixRows.length !== expectedMix) {
+    fail("mixture rendered " + mixRows.length + " rows, expected " + expectedMix +
+         " (" + DATA.regimes.length + " regions + " + DATA.clusters.k5.items.length +
+         " K=5 + " + DATA.clusters.k8.items.length + " K=8)");
+  } else {
+    const blank = mixRows.filter((row) => {
+      const values = row.all().filter((n) => n.className === "vl" || n.className === "ad");
+      return !values.length || values.some((v) => !/^-?\d+\.\d{3}$/.test(String(v.textContent)));
+    });
+    const k5Rows = mixRows.filter((row) => /^K5/.test(
+      row.all().filter((n) => n.className === "code").map((n) => n.textContent).join("")));
+    const k8Rows = mixRows.filter((row) => /^K8/.test(
+      row.all().filter((n) => n.className === "code").map((n) => n.textContent).join("")));
+    if (blank.length) fail("mixture rows have missing or non-numeric values");
+    else if (k5Rows.length !== DATA.clusters.k5.items.length)
+      fail("mixture lists " + k5Rows.length + " K=5 clusters, payload has " + DATA.clusters.k5.items.length);
+    else if (k8Rows.length !== DATA.clusters.k8.items.length)
+      fail("mixture lists " + k8Rows.length + " K=8 clusters, payload has " + DATA.clusters.k8.items.length);
+    else pass("mixture lists all " + expectedMix + " rows: " + DATA.regimes.length +
+              " regions, " + k5Rows.length + " K=5 clusters, " + k8Rows.length + " K=8 clusters");
+  }
+
+  /* Every cluster needs a named share in the payload, and each vector must be a
+     probability vector (Eq. 6). */
+  ["k5", "k8"].forEach((key) => {
+    const vector = DATA.gaps[0].cluster_mixture[key].global;
+    const k = DATA.clusters[key].k;
+    const labels = DATA.clusters[key].items.map((i) => i.label);
+    const total = vector.reduce((a, b) => a + b, 0);
+    if (vector.length !== k) fail(key + " mixture has " + vector.length + " entries, expected " + k);
+    else if (labels.some((l) => !l)) fail(key + " cluster key has an unnamed cluster");
+    else if (Math.abs(total - 1) > 0.01) fail(key + " mixture sums to " + total.toFixed(3));
+    else pass(key + " mixture: " + vector.length + " clusters, sums to " + total.toFixed(3));
+  });
+
+  /* The map legend must key every cluster too, with the same K5-n / K8-n codes the
+     panel prints, and the badge must be generated from the payload. */
+  const clusterChips = (documentStub.getElementById("cluster-legend") || { children: [] }).children
+    .filter((n) => n.className === "cluster-chip");
+  const expectedChips = DATA.clusters.k5.items.length + DATA.clusters.k8.items.length;
+  if (clusterChips.length !== expectedChips)
+    fail("cluster legend has " + clusterChips.length + " chips, expected " + expectedChips);
+  else {
+    const codes = clusterChips.map((chip) => chip.all().map((n) => n.textContent).join(""));
+    const expectedCodes = [];
+    ["k5", "k8"].forEach((key) => {
+      DATA.clusters[key].items.forEach((item) => {
+        expectedCodes.push("K" + DATA.clusters[key].k + "\u00b7" + (item.id + 1));
+      });
+    });
+    const missing = expectedCodes.filter((code) => codes.indexOf(code) < 0);
+    if (missing.length) fail("cluster legend omits " + missing.join(", "));
+    else if (!clusterChips.every((chip) => chip.attributes.title))
+      fail("a cluster legend chip has no tooltip with its name");
+    else pass("cluster legend keys all " + expectedChips + " clusters (" + expectedCodes.join(" ") + ")");
+  }
+  const badge = (documentStub.getElementById("map-badge") || {}).textContent || "";
+  if (!/\[-1\.0, 1\.0\]/.test(badge) || !badge.includes(String(DATA.meta.papers)))
+    fail("map badge is stale or malformed: " + JSON.stringify(badge));
+  else if (!/zoom/.test(badge) || !/pan/.test(badge))
+    fail("map badge does not advertise zoom/pan: " + JSON.stringify(badge));
+  else pass("map badge generated from the payload (" + badge + ")");
+
+/* The "outer edge" badge is reserved for |x| = 1 or |y| = 1. The old payload
+   test was a proximity heuristic (> 0.95), which tags interior points on any
+   grid finer than 0.1. */
+const mislabelled = DATA.gaps.filter((gap) => {
+  const expected = Math.abs(Math.abs(gap.x) - 1) < 1e-9 || Math.abs(Math.abs(gap.y) - 1) < 1e-9;
+  return Boolean(gap.on_outer_boundary) !== expected;
+});
+const boundaryBadge = documentStub.getElementById("gap-boundary-badge");
+const selected = DATA.gaps[selectedGapIndex()];
+if (mislabelled.length)
+  fail("gap #" + mislabelled[0].rank + " at (" + mislabelled[0].x + ", " + mislabelled[0].y +
+       ") carries on_outer_boundary=" + mislabelled[0].on_outer_boundary);
+else if (boundaryBadge.classList.contains("hidden") === Boolean(selected.on_outer_boundary))
+  fail("the outer-edge badge state does not match the selected gap");
+else pass("outer-edge tag reserved for |x| = 1 or |y| = 1 across " + DATA.gaps.length +
+          " gaps (" + DATA.gaps.filter((g) => g.on_outer_boundary).length + " on the edge, badge " +
+          (boundaryBadge.classList.contains("hidden") ? "hidden" : "shown") + ")");
+}
+
+/* Map controls: the reliability layer plus the zoom/pan reset. */
+function checkMapControls() {
+  /* The R layer must be reachable from the toolbar the same way the objectives are. */
+  try {
+    const rButton = layerButtons.find((b) => b.dataset.layer === "R");
+    if (!rButton) fail("no R layer button in the harness");
+    else {
+      rButton.dispatch("click");
+      const last = plotlyCalls.filter((c) => c.kind === "restyle").pop();
+      const vis = last && last.update.visible;
+      if (!vis || vis[DATA.fields.length - 1] !== true)
+        fail("clicking R did not show the reliability layer");
+      else pass("R (reliability) toggles on from the toolbar");
+      layerButtons[0].dispatch("click");
+    }
+  } catch (error) { fail("R layer toggle threw: " + error.message); }
+
+  /* Reset view: Plotly has no clamp on pan/zoom, so the button is the only way
+     back to the framed domain. */
+  try {
+    const reset = documentStub.getElementById("reset-view");
+    if (!reset || !(reset.listeners.click || []).length) fail("no reset-view handler was attached");
+    else {
+      reset.dispatch("click");
+      const call = plotlyCalls.filter((c) => c.kind === "relayout").pop();
+      const range = call && call.update["xaxis.range"];
+      if (!range || range[0] !== -1.09 || range[1] !== 1.09)
+        fail("reset-view relayout range is " + JSON.stringify(range));
+      else pass("reset-view restores the [-1.09, 1.09] frame");
+    }
+  } catch (error) { fail("reset-view threw: " + error.message); }
+}
 
 async function assertions() {
 const main = plotlyCalls.find((c) => c.kind === "newPlot" && c.el === manifoldNode);
@@ -243,12 +373,30 @@ if (!main) {
   else pass(DATA.gaps.length + " clickable gap markers");
 
   const fields = traces.filter((t) => t.type === "heatmap");
-  if (fields.length !== 4) fail("expected 4 heatmap layers, got " + fields.length);
-  else if (!fields.every((f) => f.z.length === 21 && f.z[0].length === 21))
-    fail("a heatmap is not 21x21");
+  const payloadFields = DATA.fields.map((f) => f.name);
+  if (fields.length !== payloadFields.length)
+    fail("expected " + payloadFields.length + " heatmap layers, got " + fields.length);
+  else if (!fields.every((f) => f.z.length === DATA.meta.grid_size && f.z[0].length === DATA.meta.grid_size))
+    fail("a heatmap is not " + DATA.meta.grid_size + "x" + DATA.meta.grid_size);
   else if (fields.some((f) => f.visible !== false))
     fail("a heatmap starts visible; the first frame must be papers + gaps");
-  else pass("4 heatmap layers, 21x21, all hidden on load");
+  else if (payloadFields[payloadFields.length - 1] !== "R")
+    fail("reliability is not the last field layer: " + payloadFields.join(","));
+  else if (!fields.every((f, i) => f.name === (payloadFields[i] === "R" ? "Model-based reliability" : f.name)))
+    fail("field trace names do not follow the payload order");
+  else pass(payloadFields.length + " heatmap layers (" + payloadFields.join(",") + "), " +
+            DATA.meta.grid_size + "x" + DATA.meta.grid_size + ", all hidden on load");
+
+  /* Reliability is a Sec. 3.7 diagnostic, not a fifth objective: the objective
+     matrix keeps four columns and R must still be a full field. */
+  const reliability = DATA.fields.find((f) => f.name === "R");
+  if (!reliability) fail("payload carries no R (reliability) field");
+  else if (DATA.gaps[0].objectives.R !== undefined)
+    fail("R leaked into the gap objectives; it is not a Pareto objective");
+  else if (reliability.min < 0 || reliability.max > 1)
+    fail("reliability is outside [0, 1]: " + reliability.min + ".." + reliability.max);
+  else pass("R layer present and normalised (" + reliability.min + ".." + reliability.max +
+            "), absent from the Pareto objective vector");
 
   const firstField = fields[0];
   const transposed = firstField.z[17][3];
@@ -256,6 +404,25 @@ if (!main) {
   if (Math.abs(transposed - direct) < 1e-9) fail("field is symmetric; transposition cannot be judged");
   else pass("field orientation check: z[y=+0.7][x=-0.7]=" + transposed.toFixed(4) +
             " vs z[y=-0.7][x=+0.7]=" + direct.toFixed(4));
+
+  /* The frame is the plot's true domain and must survive a field heatmap: a
+     single `below` rect gets painted over by the layer, so there are two. */
+  const rects = ((main.layout || {}).shapes || []).filter((s) => s.type === "rect");
+  const frame = rects.filter((s) => s.x0 === -1 && s.y0 === -1 && s.x1 === 1 && s.y1 === 1);
+  const above = frame.filter((s) => s.layer === "above" && s.line && s.line.width > 0);
+  if (frame.length < 2) fail("the [-1, 1]^2 border is not drawn (found " + frame.length + " rects)");
+  else if (above.length !== 1) fail("no visible [-1, 1]^2 border above the traces");
+  else pass("[-1, 1]^2 frame drawn below and above the traces");
+
+  /* Zoom and pan: the wheel zooms, a drag pans, a double click resets, and the
+     toolbar has its own reset. */
+  if ((main.layout || {}).dragmode !== "pan")
+    fail("map dragmode is " + JSON.stringify((main.layout || {}).dragmode) + ", expected pan");
+  else if (!main.config || main.config.scrollZoom !== true)
+    fail("scrollZoom is off; the wheel would not zoom");
+  else if (!main.config || main.config.doubleClick !== "reset")
+    fail("double click is not wired to reset the view");
+  else pass("map: drag pans, wheel zooms, double click resets");
 
   const top = traces.find((t) => t.name === "#1 compromise");
   const best = DATA.gaps[0];
@@ -300,20 +467,8 @@ else pass("stats grid rendered (" + stats.length + " text nodes)");
 if (anchors.length !== 5) fail("rendered " + anchors.length + " anchor links, expected 5");
 else pass("5 anchor paper links rendered");
 
-/* The regime mixture renders three Eq. 6 views per regime. A payload key change
-   once left every column blank, which looks like a styling issue and is easy to
-   miss, so the numbers themselves are asserted. */
-const mixRows = documentStub.getElementById("mixture").all().filter((n) => n.className === "mix-row");
-if (mixRows.length !== DATA.regimes.length)
-  fail("mixture rendered " + mixRows.length + " rows, expected " + DATA.regimes.length);
-else {
-  const blank = mixRows.filter((row) => {
-    const values = row.all().filter((n) => n.className === "vl" || n.className === "ad");
-    return values.length !== 3 || values.some((v) => !/^\d+\.\d{3}$/.test(String(v.textContent)));
-  });
-  if (blank.length) fail("mixture rows have missing or non-numeric values");
-  else pass("regime mixture renders 3 numeric views for all " + mixRows.length + " regimes");
-}
+checkDiagnostics();
+
 if (options.length !== DATA.gaps.length)
   fail("gap dropdown has " + options.length + " options, payload has " + DATA.gaps.length);
 else pass("gap dropdown has all " + DATA.gaps.length + " gaps");
@@ -334,18 +489,24 @@ try {
   if (!last || !Array.isArray(last.update.visible)) fail("layer button did not restyle visibility");
   else {
     const vis = last.update.visible;
-    const visibleFields = vis.filter((v, i) => i < 4 && v).length;
+    const fieldCount = DATA.fields.length;
+    const visibleFields = vis.filter((v, i) => i < fieldCount && v).length;
     if (vis.length !== manifoldTraces.length) {
       fail("visibility array has " + vis.length + " entries for " + manifoldTraces.length + " traces");
     } else if (visibleFields !== 1) {
       fail("layer switch left " + visibleFields + " fields visible, expected 1");
-    } else if (vis.slice(4).some((v) => v !== true)) {
+    } else if (vis.slice(fieldCount).some((v) => v !== true)) {
       fail("layer switch hid a non-field trace (markers would vanish)");
+    } else if (vis[fieldCount - 1] !== false) {
+      fail("the R layer is visible while W is active");
     } else {
-      pass("layer toggle: 1 of 4 fields visible, all " + (vis.length - 4) + " marker traces kept");
+      pass("layer toggle: 1 of " + fieldCount + " fields visible, all " +
+           (vis.length - fieldCount) + " marker traces kept");
     }
   }
 } catch (error) { fail("layer toggle threw: " + error.message); }
+
+checkMapControls();
 
 try {
   documentStub.getElementById("next-btn").dispatch("click");
@@ -397,9 +558,19 @@ if (!idea) {
     if (ideaAnnotation.length !== 1) fail("expected 1 'your idea' annotation, got " + ideaAnnotation.length);
     else pass("'your idea' annotation drawn at (" + ideaAnnotation[0].x + ", " + ideaAnnotation[0].y + ")");
 
+    /* The card exists at boot but must not own the top of the drawer: it is the
+       overlay's payload, and the drawer opens on the selected gap. */
     const section = documentStub.getElementById("sec-idea");
-    if (section.classList.contains("hidden")) fail("idea card is still hidden");
-    else pass("idea card un-hidden");
+    if (!section.classList.contains("hidden")) fail("idea card is visible at boot; the drawer must open on the selected gap");
+    else pass("idea card is hidden at boot (drawer opens on the selected gap)");
+    const drawer = documentStub.getElementById("drawer-scroll");
+    if (drawer.classList.contains("idea-mode")) fail("drawer started in idea mode");
+    else pass("drawer starts outside idea mode");
+    const toggle = documentStub.getElementById("idea-btn");
+    if (!toggle) fail("no i-idea toggle button was wired");
+    else if (toggle.getAttribute("aria-pressed") !== "false")
+      fail("i-idea toggle does not start unpressed");
+    else pass("i idea toggle present and unpressed at boot");
 
     const title = documentStub.getElementById("idea-title").textContent;
     if (title !== idea.label) fail("idea card title is \"" + title + "\", payload says \"" + idea.label + "\"");
@@ -531,36 +702,56 @@ if (!idea) {
 
     const handlers = manifoldNode.listeners["plotly_click"] || [];
     handlers[0]({ points: [{ data: { name: "Your idea" }, pointNumber: 0 }] });
-    if (!section.scrolled) fail("clicking the idea marker did not scroll to its card");
-    else pass("clicking the idea marker focuses the idea card");
+    /* The overlay scrolls to the scorecard, because that is where the comparison
+       happens; the evidence card sits directly under it. */
+    const radarNode = documentStub.getElementById("radar");
+    if (!radarNode.scrolled) fail("clicking the idea marker did not scroll to the scorecard");
+    else if (section.classList.contains("hidden")) fail("clicking the idea marker did not reveal its card");
+    else pass("clicking the idea marker opens the overlay and scrolls to the scorecard");
 
-    /* Focusing the idea must not leave a gap number sitting under the idea
-       card: the corpus panes are hidden, and the map's selection ring and the
-       diamond both follow the idea. */
+    /* The overlay is a toggle, and the selected gap stays the inspector's
+       subject: the dashed idea polygon is added to the scorecard, the ring does
+       not jump to the idea, and the gap panes stay visible for comparison. */
     const scroll = documentStub.getElementById("drawer-scroll");
     if (!scroll.classList.contains("idea-mode")) {
-      fail("focusing the idea did not switch the drawer into idea mode");
+      fail("opening the idea did not switch the drawer into idea mode");
     } else {
-      const restyles = plotlyCalls.filter((c) => c.kind === "restyle");
-      const ring = restyles.filter((c) => c.update.x).pop();
-      const ringAt = ring && Array.isArray(ring.update.x[0]) ? ring.update.x[0][0] : null;
-      const diamondGrow = restyles.filter((c) => c.update["marker.size"] === 19).pop();
-      if (!ring || Math.abs(ringAt - idea.x) > 1e-9) {
-        fail("selection ring did not move to the idea point (restyle x = " + JSON.stringify(ring && ring.update.x) + ")");
-      } else if (!diamondGrow) {
-        fail("focusing the idea never enlarged the diamond marker");
-      } else pass(
-        "focusing the idea switches the drawer to idea mode, enlarges the diamond, and rings it at (" + ringAt + ")"
-      );
+      const radar = plotlyCalls.filter((c) => c.el === documentStub.getElementById("radar")).pop();
+      const polar = ((radar && radar.traces) || []).filter((t) => t.type === "scatterpolar");
+      const dashed = polar.filter((t) => t.line && t.line.dash === "dash");
+      const rings = plotlyCalls.filter((c) => c.kind === "restyle" && c.update.x).pop();
+      const ringAt = rings && Array.isArray(rings.update.x[0]) ? rings.update.x[0][0] : null;
+      const gapAt = DATA.gaps[selectedGapIndex()];
+      if (dashed.length !== 1) fail("the scorecard has " + dashed.length + " dashed idea polygons, expected 1");
+      else if (dashed[0].r[0] !== dashed[0].r[4]) fail("the idea polygon is not closed");
+      else if (ringAt !== null && Math.abs(ringAt - gapAt.x) > 1e-9)
+        fail("the selection ring left the selected gap for the idea (x=" + ringAt + ")");
+      else pass("overlay on: dashed [P,W,G,S] idea polygon added, ring stays on the selected gap");
     }
 
     const back = documentStub.getElementById("idea-back");
-    if (!back) fail("idea card has no way back to the gaps");
+    if (!back) fail("idea card has no way to close the overlay");
     else {
       back.dispatch("click");
-      if (scroll.classList.contains("idea-mode")) fail("back button left the drawer in idea mode");
-      else pass("idea card's back button returns the drawer to the selected gap");
+      if (scroll.classList.contains("idea-mode")) fail("the close button left the overlay on");
+      else if (!section.classList.contains("hidden")) fail("the close button left the idea card visible");
+      else pass("closing the overlay returns the drawer to the selected gap alone");
     }
+
+    /* Selecting a gap while the overlay is on is a clean switch: the idea card
+       and its polygon leave, and the gap card is the top of the inspector. */
+    try {
+      toggle.dispatch("click");
+      if (!scroll.classList.contains("idea-mode")) fail("i-idea button did not open the overlay");
+      const before = documentStub.getElementById("gap-rank").textContent;
+      documentStub.getElementById("next-btn").dispatch("click");
+      if (scroll.classList.contains("idea-mode")) fail("selecting a gap left the idea overlay on");
+      else if (!section.classList.contains("hidden")) fail("selecting a gap left the idea card visible");
+      else if (documentStub.getElementById("gap-rank").textContent === before)
+        fail("selecting a new gap did not move the drawer");
+      else pass("selecting a gap turns the idea overlay off and rewrites the gap header");
+      documentStub.getElementById("prev-btn").dispatch("click");
+    } catch (error) { fail("selecting a gap during the overlay threw: " + error.message); }
   } catch (error) {
     fail("idea overlay assertions threw: " + error.message);
   }
